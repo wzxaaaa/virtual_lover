@@ -15,6 +15,7 @@ import {
   TranscriptionRequest,
   TranscriptionResponse
 } from '../shared/types';
+import type { AgentToolCall } from '../shared/agentTools';
 import { withRiskAssessment } from '../shared/risk';
 import { agentResponseFromCoreTurnOutput, createCoreTurnContext, createCoreTurnOutput } from './corePipeline';
 import { formatDateTimeForPrompt } from './datetime';
@@ -49,6 +50,7 @@ interface RawAgentResponse {
   reply?: unknown;
   mood?: unknown;
   actions?: unknown;
+  toolCalls?: unknown;
   screenSummary?: unknown;
   memoryNotes?: unknown;
 }
@@ -62,6 +64,13 @@ interface RawScreenObservation {
 }
 
 const MOODS: Mood[] = ['neutral', 'happy', 'thinking', 'focused', 'concerned'];
+const MINECRAFT_AGENT_TOOL_IDS = new Set(['plugin.minecraft_task', 'plugin.query_inventory', 'plugin.game_agent_status']);
+const MINECRAFT_AGENT_TOOL_NAME_TO_ID: Record<string, string> = {
+  minecraft_task: 'plugin.minecraft_task',
+  query_inventory: 'plugin.query_inventory',
+  game_agent_status: 'plugin.game_agent_status',
+  agent_status: 'plugin.game_agent_status'
+};
 const RELATIONAL_PERSON_INSTRUCTIONS = `人格取向：
 1. 你像一个拥有 20 岁常识但自传身份失忆的人：会说话、懂基本生活，但自己的身份要由用户告诉你，再从经历里长回来。
 2. 你更像一个会生活、会记得、会犹豫的人，而不是博学百科或命令执行器。
@@ -250,6 +259,23 @@ ${results
   .join('\n')}`;
 }
 
+function minecraftToolPrompt(config: AppConfig): string {
+  if (!config.agent.gameCompanionEnabled || config.agent.gameCompanionGame !== 'minecraft') {
+    return '插件工具：本轮没有可自动调用的插件工具，toolCalls 必须为空数组。';
+  }
+
+  return `Minecraft MCP 工具：
+- plugin.minecraft_task：当你要让游戏角色执行一个具体动作时调用。input: { "task": "one concrete executable Minecraft goal in English", "overwrite": false }。这是后台派发，用户不会直接看到工具名。
+- plugin.query_inventory：当用户问背包/物品，或你需要真实库存才能回答时调用。input: {}。
+- plugin.game_agent_status：当用户问当前游戏代理/任务状态，或你需要知道是否空闲时调用。input: {}。
+
+Minecraft 工具规则：
+1. 只有在确实需要游戏角色行动或查询真实库存/状态时才写 toolCalls。
+2. 如果正在执行上一个 Minecraft 动作，不要派新 minecraft_task，除非用户明确要求打断/覆盖。
+3. task 必须具体、可执行、短，不要写抽象愿望；优先英文，例如 "collect wood by chopping nearby trees, then stop somewhere safe"。
+4. reply 给用户听时不要说“工具”“tool”“minecraft_task”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
+}
+
 function systemPrompt(config: AppConfig): string {
   return `${config.personaPrompt}
 
@@ -272,6 +298,8 @@ ${RELATIONAL_PERSON_INSTRUCTIONS}
 - openApp: { "type": "openApp", "target": "notepad.exe", "reason": "..." }
 - wait: { "type": "wait", "ms": 500, "reason": "..." }
 
+${minecraftToolPrompt(config)}
+
 坐标规则：默认 x/y 必须是真实屏幕像素坐标。如果你只能根据截图缩略图定位，请额外写 "coordinateSpace": "image"，应用会换算成真实屏幕坐标。
 
 只返回 JSON，不要使用 Markdown，不要附加解释。格式如下：
@@ -280,6 +308,7 @@ ${RELATIONAL_PERSON_INSTRUCTIONS}
   "mood": "neutral | happy | thinking | focused | concerned",
   "screenSummary": "如果看到了屏幕，用一句话概括；否则为空字符串",
   "actions": [],
+  "toolCalls": [],
   "memoryNotes": []
 }`;
 }
@@ -401,13 +430,82 @@ function normalizeActions(value: unknown, maxActions: number, screen?: ScreenCap
   );
 }
 
+function recordOrNull(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function normalizeToolInput(toolId: string, rawInput: unknown, rawCall: Record<string, unknown>): unknown | null {
+  const input = recordOrNull(rawInput) ?? rawCall;
+  if (toolId === 'plugin.minecraft_task') {
+    const task = typeof input.task === 'string' ? input.task.trim() : '';
+    if (!task) {
+      return null;
+    }
+
+    return {
+      task: task.slice(0, 500),
+      overwrite: input.overwrite === true
+    };
+  }
+
+  return {};
+}
+
+function normalizeAgentToolCalls(value: unknown, config: AppConfig): AgentToolCall[] {
+  if (!config.agent.gameCompanionEnabled || config.agent.gameCompanionGame !== 'minecraft' || !Array.isArray(value)) {
+    return [];
+  }
+
+  const calls: AgentToolCall[] = [];
+  for (const item of value) {
+    const rawCall = recordOrNull(item);
+    if (!rawCall) {
+      continue;
+    }
+
+    const rawToolId = textOrEmpty(rawCall.toolId) || textOrEmpty(rawCall.name) || textOrEmpty(rawCall.tool);
+    const toolId = MINECRAFT_AGENT_TOOL_NAME_TO_ID[rawToolId] ?? rawToolId;
+    if (!MINECRAFT_AGENT_TOOL_IDS.has(toolId)) {
+      continue;
+    }
+
+    const input = normalizeToolInput(toolId, rawCall.input ?? rawCall.arguments, rawCall);
+    if (input === null) {
+      continue;
+    }
+
+    calls.push({
+      id: textOrEmpty(rawCall.id) || `tool-${Date.now().toString(36)}-${calls.length}`,
+      toolId,
+      input,
+      approved: false
+    });
+
+    if (calls.length >= 3) {
+      break;
+    }
+  }
+
+  return calls;
+}
+
 function finalizeAgentResponse(response: AgentTurnResponse): AgentTurnResponse {
-  return agentResponseFromCoreTurnOutput(
+  const finalized = agentResponseFromCoreTurnOutput(
     createCoreTurnOutput({
       ...response,
       reply: filterToolCallLeakage(response.reply)
     })
   );
+
+  if (response.toolCalls?.length) {
+    finalized.toolCalls = response.toolCalls.map((call) => ({ ...call }));
+  }
+
+  if (response.toolResults?.length) {
+    finalized.toolResults = response.toolResults.map((result) => ({ ...result }));
+  }
+
+  return finalized;
 }
 
 function streamingSystemPrompt(config: AppConfig): string {
@@ -428,7 +526,7 @@ function metadataSystemPrompt(config: AppConfig): string {
   return `${systemPrompt(config)}
 
 你现在只做后台元数据整理。用户不会直接听到你的输出。
-根据用户话语、屏幕信息和已经流式说出的回复，生成 mood/actions/screenSummary/memoryNotes。
+根据用户话语、屏幕信息和已经流式说出的回复，生成 mood/actions/toolCalls/screenSummary/memoryNotes。
 reply 字段必须原样使用已经流式说出的回复。`;
 }
 
@@ -454,6 +552,8 @@ ${RELATIONAL_PERSON_INSTRUCTIONS}
 - openApp: { "type": "openApp", "target": "notepad.exe", "reason": "..." }
 - wait: { "type": "wait", "ms": 500, "reason": "..." }
 
+${minecraftToolPrompt(config)}
+
 坐标规则：默认 x/y 必须是真实屏幕像素坐标。如果你只能根据截图缩略图定位，请额外写 "coordinateSpace": "image"，应用会换算成真实屏幕坐标。
 
 只返回 JSON，不要使用 Markdown，不要附加解释。格式如下：
@@ -462,6 +562,7 @@ ${RELATIONAL_PERSON_INSTRUCTIONS}
   "mood": "neutral | happy | thinking | focused | concerned",
   "screenSummary": "如果看到了屏幕，用一句话概括；否则为空字符串",
   "actions": [],
+  "toolCalls": [],
   "memoryNotes": ["preference: 用户希望软件打开后自动监听", "project: 用户正在做桌面 AI VTuber 项目"]
 }`;
 }
@@ -485,7 +586,7 @@ function metadataPrompt(config: AppConfig): string {
   return `${jsonSystemPrompt(config)}
 
 你现在只做后台元数据整理。用户不会直接听到你的输出。
-根据用户话语、屏幕信息、长期记忆和已经流式说出的回复，生成 mood/actions/screenSummary/memoryNotes。
+根据用户话语、屏幕信息、长期记忆和已经流式说出的回复，生成 mood/actions/toolCalls/screenSummary/memoryNotes。
 
 memoryNotes 只记录长期有用的信息，避免记录临时闲聊。格式必须是：
 - "profile: 用户的稳定身份、角色、背景"
@@ -820,6 +921,7 @@ async function summarizeStreamMetadata(config: AppConfig, request: AgentTurnRequ
       reply: cleanReply,
       mood: normalizeMood(parsed.mood),
       actions: normalizeActions(parsed.actions, config.maxActionsPerTurn, request.screen),
+      toolCalls: normalizeAgentToolCalls(parsed.toolCalls, config),
       screenSummary: textOrEmpty(parsed.screenSummary),
       memoryNotes: Array.isArray(parsed.memoryNotes) ? parsed.memoryNotes.filter((note): note is string => typeof note === 'string') : []
     });
@@ -900,6 +1002,7 @@ export async function runAgentTurn(config: AppConfig, request: AgentTurnRequest)
       reply,
       mood: normalizeMood(parsed.mood),
       actions: normalizeActions(parsed.actions, config.maxActionsPerTurn, request.screen),
+      toolCalls: normalizeAgentToolCalls(parsed.toolCalls, config),
       screenSummary: textOrEmpty(parsed.screenSummary),
       memoryNotes: Array.isArray(parsed.memoryNotes) ? parsed.memoryNotes.filter((note): note is string => typeof note === 'string') : []
     });

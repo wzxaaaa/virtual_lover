@@ -309,7 +309,7 @@ export interface MinecraftAgentTaskRequest {
 
 export interface MinecraftAgentTaskResult {
   ok: boolean;
-  status: 'ok' | 'busy' | 'timeout' | 'not_connected' | 'interrupted' | 'error';
+  status: 'dispatched' | 'ok' | 'busy' | 'timeout' | 'not_connected' | 'interrupted' | 'error';
   query: string;
   taskId?: string;
   text?: string;
@@ -626,10 +626,28 @@ export interface AgentTurnRequest {
   memory?: MemoryState | null;
 }
 
+export interface AgentTurnToolCall {
+  id?: string;
+  toolId: string;
+  input: unknown;
+  approved?: boolean;
+}
+
+export interface AgentTurnToolResult {
+  ok: boolean;
+  toolId: string;
+  callId?: string;
+  message: string;
+  output?: unknown;
+  error?: string;
+}
+
 export interface AgentTurnResponse {
   reply: string;
   mood: Mood;
   actions: AutomationAction[];
+  toolCalls?: AgentTurnToolCall[];
+  toolResults?: AgentTurnToolResult[];
   screenSummary?: string;
   memoryNotes?: string[];
   error?: string;

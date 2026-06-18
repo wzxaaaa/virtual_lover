@@ -1,8 +1,9 @@
 import { executeAutomationAction } from './automation';
 import { getDateTimeSnapshot } from './datetime';
-import { queryMinecraftAgentInventory, sendMinecraftAgentTask } from './minecraftAgent';
+import { dispatchMinecraftAgentTask, getMinecraftAgentStatus, queryMinecraftAgentInventory } from './minecraftAgent';
 import type { AgentToolCall, AgentToolDefinition, AgentToolResult } from '../shared/agentTools';
 import { AUTOMATION_TOOL_IDS, toolIdForAutomationAction } from '../shared/agentTools';
+import { formatMinecraftAgentStatus } from '../shared/gameCompanion';
 import type { ActionResult, AppConfig, AutomationAction, MouseButton } from '../shared/types';
 
 type AgentToolHandler = (input: unknown, context: AgentToolContext, call: AgentToolCall) => Promise<AgentToolResult>;
@@ -193,7 +194,7 @@ registerAgentTool(
       return invalidInputResult(call, 'task string');
     }
 
-    const result = await sendMinecraftAgentTask(context.config, {
+    const result = await dispatchMinecraftAgentTask(context.config, {
       task: input.task,
       overwrite: input.overwrite === true
     });
@@ -205,6 +206,30 @@ registerAgentTool(
       message: result.summary,
       output: result,
       error: result.ok ? undefined : result.error ?? result.summary
+    };
+  }
+);
+
+registerAgentTool(
+  {
+    id: 'plugin.game_agent_status',
+    namespace: 'plugin',
+    name: 'Minecraft agent status',
+    description: 'Return the current local Minecraft game agent connection, task, log and inventory status.',
+    inputSchema: schema({}, []),
+    resultKind: 'data',
+    safety: 'auto',
+    requiresApproval: false,
+    permissions: []
+  },
+  async (_input, context, call) => {
+    const status = getMinecraftAgentStatus(context.config);
+    return {
+      ok: true,
+      toolId: call.toolId,
+      callId: call.id,
+      message: formatMinecraftAgentStatus(status),
+      output: status
     };
   }
 );

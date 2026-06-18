@@ -114,6 +114,10 @@ function normalizeTaskStatus(status: unknown, text: string): MinecraftAgentTaskR
 }
 
 function taskSummary(result: MinecraftAgentTaskResult): string {
+  if (result.status === 'dispatched') {
+    return `Minecraft 任务已下发：${result.query}`;
+  }
+
   if (result.status === 'ok') {
     return `Minecraft 动作完成：${result.query}`;
   }
@@ -294,6 +298,95 @@ class MinecraftAgentService {
         });
       }
     });
+  }
+
+  async dispatchTask(config: AppConfig, request: MinecraftAgentTaskRequest): Promise<MinecraftAgentTaskResult> {
+    const taskText = request.task.trim();
+    if (!taskText) {
+      return {
+        ok: false,
+        status: 'error',
+        query: '',
+        summary: 'Minecraft 任务不能为空。',
+        error: 'Empty task.'
+      };
+    }
+
+    this.start(config);
+    if (!(await this.waitForConnection(CONNECT_WAIT_MS))) {
+      return {
+        ok: false,
+        status: 'not_connected',
+        query: taskText,
+        summary: '本地 Minecraft Agent 还没有连接。',
+        error: this.lastError ?? 'WebSocket is not connected.'
+      };
+    }
+
+    if (this.pendingTask && request.overwrite !== true) {
+      return {
+        ok: false,
+        status: 'busy',
+        query: this.pendingTask.taskText,
+        taskId: this.pendingTask.taskId,
+        summary: `Minecraft 角色还在执行：${this.pendingTask.taskText}`
+      };
+    }
+
+    if (this.pendingTask && request.overwrite === true) {
+      this.resolvePending({
+        ok: false,
+        status: 'interrupted',
+        query: this.pendingTask.taskText,
+        taskId: this.pendingTask.taskId,
+        summary: `Minecraft 动作已被新任务打断：${this.pendingTask.taskText}`
+      });
+    }
+
+    const taskId = randomUUID();
+    const timeoutMs = normalizeTimeoutMs(request.timeoutMs ?? config.agent.minecraftAgentTaskTimeoutMs);
+    const pending: PendingTask = {
+      taskText,
+      taskId,
+      startedAt: Date.now(),
+      timeout: setTimeout(() => {
+        if (this.pendingTask?.taskId === taskId) {
+          this.resolvePending({
+            ok: false,
+            status: 'timeout',
+            query: taskText,
+            taskId,
+            summary: `Minecraft 动作超时：${taskText}`
+          });
+        }
+      }, timeoutMs),
+      resolve: () => undefined
+    };
+
+    this.pendingTask = pending;
+    const sent = this.sendJson({ type: 'task', task: taskText, task_id: taskId });
+    if (!sent) {
+      const result: MinecraftAgentTaskResult = {
+        ok: false,
+        status: 'not_connected',
+        query: taskText,
+        taskId,
+        summary: '本地 Minecraft Agent 还没有连接。',
+        error: 'WebSocket send failed.'
+      };
+      this.resolvePending(result);
+      return result;
+    }
+
+    const result: MinecraftAgentTaskResult = {
+      ok: true,
+      status: 'dispatched',
+      query: taskText,
+      taskId,
+      summary: `Minecraft 任务已下发：${taskText}`
+    };
+    this.emitStatus();
+    return result;
   }
 
   async queryInventory(config: AppConfig, timeoutMs = 2000): Promise<MinecraftAgentInventoryResponse> {
@@ -607,6 +700,10 @@ export function stopMinecraftAgent(): void {
 
 export async function sendMinecraftAgentTask(config: AppConfig, request: MinecraftAgentTaskRequest): Promise<MinecraftAgentTaskResult> {
   return minecraftAgentService.sendTask(config, request);
+}
+
+export async function dispatchMinecraftAgentTask(config: AppConfig, request: MinecraftAgentTaskRequest): Promise<MinecraftAgentTaskResult> {
+  return minecraftAgentService.dispatchTask(config, request);
 }
 
 export async function queryMinecraftAgentInventory(config: AppConfig, timeoutMs?: number): Promise<MinecraftAgentInventoryResponse> {

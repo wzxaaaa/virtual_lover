@@ -52,6 +52,8 @@ import {
   Live2DTouchSetConfig,
   Live2DTouchSetEntryConfig,
   MemoryState,
+  MinecraftAgentStatus,
+  MinecraftAgentTaskResult,
   Mood,
   PetWindowMoveToRequest,
   PetWindowMoveResult,
@@ -63,6 +65,7 @@ import {
   TtsSynthesisResponse,
   VirtualHeartbeatEvent
 } from '../shared/types';
+import type { AgentToolCall, AgentToolResult } from '../shared/agentTools';
 import { withRiskAssessment } from '../shared/risk';
 import type { Live2DTouchFeedback } from '../shared/live2dBehavior';
 import {
@@ -78,7 +81,12 @@ import {
   type Live2DTouchConfigResources
 } from '../shared/live2dTouchConfig';
 import { normalizeTtsText, prepareTtsTextForSpeechSegments } from '../shared/ttsText';
-import { buildGameCompanionPrompt, getGameCompanionTextIntent, isNoGameCompanionComment } from '../shared/gameCompanion';
+import {
+  buildGameCompanionPrompt,
+  getGameCompanionTextIntent,
+  getMinecraftPluginTextIntent,
+  isNoGameCompanionComment
+} from '../shared/gameCompanion';
 import { IDLE_AUDIO_INPUT_LEVEL, createAudioInputPipeline, type AudioInputLevelMetrics, type AudioInputPipeline } from './audioInput';
 import { captureCameraFrame, getUserCameraStream, stopCameraStream } from './cameraCapture';
 import { MarketplacePanel } from './MarketplacePanel';
@@ -185,6 +193,82 @@ const MULTISCREEN_DRAG_HINT_TEXT = {
 };
 const SCREEN_AUTO_OBSERVE_RE =
   /屏幕|桌面|电脑|窗口|界面|截图|显示器|监视器|当前画面|你.*(看到|看见|看得到|看得见)|看.*(屏幕|桌面|电脑|窗口|界面|画面)|观察.*(屏幕|桌面|电脑|窗口|界面)/i;
+const AUTO_PLUGIN_TOOL_IDS = new Set(['plugin.minecraft_task', 'plugin.query_inventory', 'plugin.game_agent_status']);
+
+function isMinecraftAgentStatus(value: unknown): value is MinecraftAgentStatus {
+  return value !== null && typeof value === 'object' && 'connected' in value && 'pendingTask' in value && 'lastInventory' in value;
+}
+
+function isMinecraftAgentTaskResult(value: unknown): value is MinecraftAgentTaskResult {
+  return value !== null && typeof value === 'object' && 'status' in value && 'query' in value && 'summary' in value;
+}
+
+function formatMinecraftStatusReply(result: AgentToolResult): string {
+  if (!result.ok) {
+    return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+  }
+
+  if (!isMinecraftAgentStatus(result.output)) {
+    return result.message || '我现在在 Minecraft 陪玩状态。';
+  }
+
+  const status = result.output;
+  if (!status.connected) {
+    return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+  }
+
+  const inventoryItems = Object.entries(status.lastInventory)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name, count]) => `${name}×${count}`)
+    .join('、');
+  const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
+  const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
+  const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
+  return [taskLine, logLine, bagLine].filter(Boolean).join('\n');
+}
+
+function formatMinecraftTaskReply(result: AgentToolResult): string {
+  if (!isMinecraftAgentTaskResult(result.output)) {
+    return result.ok ? '好，我去做。' : result.message || '这一步我没接住，你再说具体一点。';
+  }
+
+  const taskResult = result.output;
+  switch (taskResult.status) {
+    case 'dispatched':
+      return '好，我去做。';
+    case 'busy':
+      return `我还在做上一步：${taskResult.query.slice(0, 80)}。要打断的话，直接说“停一下，改去……”。`;
+    case 'not_connected':
+      return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+    case 'timeout':
+      return '这一步卡住太久了，我先停一下，等你下一句。';
+    case 'interrupted':
+      return '好，我先切到新的动作。';
+    case 'error':
+      return taskResult.text ? `这一步没做成：${taskResult.text}` : '这一步没做成，你再给我一个更具体的目标。';
+    case 'ok':
+      return taskResult.text ? `这步做完了：${taskResult.text}` : '这步做完了。';
+  }
+}
+
+function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): string | null {
+  switch (result.status) {
+    case 'ok':
+      return result.text ? `这步做完了：${result.text}` : '这步做完了。';
+    case 'timeout':
+      return '这一步好像卡住了，我先停下等你。';
+    case 'error':
+      return result.text ? `这一步没做成：${result.text}` : '这一步没做成，我先停下等你。';
+    case 'interrupted':
+      return null;
+    case 'busy':
+    case 'dispatched':
+    case 'not_connected':
+      return null;
+  }
+}
 
 type PetToolbarStyle = Pick<CSSProperties, 'left' | 'top' | 'transform'>;
 type PetReactionTheme = 'thinking' | 'happy' | 'sad' | 'angry' | 'neutral' | 'surprised';
@@ -2742,8 +2826,32 @@ export function App(): ReactElement {
     config.agent.gameCompanionIntervalMs
   ]);
 
+  useEffect(() => {
+    return window.lover.onMinecraftAgentEvent((event) => {
+      if (!configRef.current.agent.gameCompanionEnabled || event.type !== 'taskFinished') {
+        return;
+      }
+
+      const cue = formatMinecraftTaskFinishedCue(event.result);
+      if (!cue) {
+        return;
+      }
+
+      updateMessages((current) => [...current, createMessage('assistant', cue)]);
+      const nextMood: Mood = event.result.ok ? 'happy' : 'concerned';
+      setMood(nextMood);
+      showPetReactionEmotion(nextMood, configRef.current.voice.ttsEnabled ? PET_REACTION_TIMING.maxVisibleMs : PET_REACTION_TIMING.textOnlyFallbackMs);
+      if (configRef.current.voice.ttsEnabled) {
+        enqueueSpeech(cue);
+      }
+      setStatus(event.result.ok ? 'Minecraft 动作已完成' : 'Minecraft 动作未完成');
+      restartListeningAfterSpeech();
+    });
+  }, [showPetReactionEmotion]);
+
   async function commitConfig(nextConfig: AppConfig): Promise<void> {
     setConfig(nextConfig);
+    configRef.current = nextConfig;
     await window.lover.saveConfig(nextConfig);
   }
 
@@ -3795,12 +3903,12 @@ export function App(): ReactElement {
         return;
       }
 
-      if (isNoGameCompanionComment(response.reply)) {
+      if (isNoGameCompanionComment(response.reply) && !response.toolCalls?.length) {
         setStatus('游戏陪玩观察中');
         return;
       }
 
-      await handleAgentResponse({ ...response, actions: [] }, true);
+      await handleAgentResponse({ ...response, actions: [] }, !isNoGameCompanionComment(response.reply));
     } catch (error) {
       setStatus(`游戏陪玩中断：${compactError(error)}`);
     } finally {
@@ -3857,6 +3965,123 @@ export function App(): ReactElement {
 
     await switchGameCompanionMode(intent === 'start', text);
     return true;
+  }
+
+  function appendMinecraftPluginExchange(userText: string, assistantText: string, nextMood: Mood): void {
+    updateMessages((current) => [...current, createMessage('user', userText), createMessage('assistant', assistantText)]);
+    setMood(nextMood);
+    showPetReactionEmotion(nextMood, configRef.current.voice.ttsEnabled ? PET_REACTION_TIMING.maxVisibleMs : PET_REACTION_TIMING.textOnlyFallbackMs);
+    if (configRef.current.voice.ttsEnabled) {
+      enqueueSpeech(assistantText);
+    }
+    restartListeningAfterSpeech();
+  }
+
+  async function handleMinecraftPluginTextIntent(text: string): Promise<boolean> {
+    const intent = getMinecraftPluginTextIntent(text, configRef.current.agent.gameCompanionEnabled);
+    if (!intent) {
+      return false;
+    }
+
+    thinkingRef.current = true;
+    setThinking(true);
+    setInterimText('');
+    setStatus('Minecraft 插件处理中');
+    stopSpeechPlayback();
+    showPetReactionThinking();
+    await window.lover.saveConfig(configRef.current);
+
+    try {
+      if (!configRef.current.agent.gameCompanionEnabled) {
+        await switchGameCompanionMode(true);
+      }
+
+      let result: AgentToolResult;
+      if (intent.type === 'inventory') {
+        result = await window.lover.invokeAgentTool({ toolId: 'plugin.query_inventory', input: {} });
+      } else if (intent.type === 'status') {
+        result = await window.lover.invokeAgentTool({ toolId: 'plugin.game_agent_status', input: {} });
+      } else {
+        result = await window.lover.invokeAgentTool({
+          toolId: 'plugin.minecraft_task',
+          input: {
+            task: intent.task,
+            overwrite: intent.overwrite
+          }
+        });
+      }
+
+      const reply =
+        intent.type === 'inventory'
+          ? result.ok
+            ? result.message
+            : '我现在还查不到背包，只能先看着画面陪你。'
+          : intent.type === 'status'
+            ? formatMinecraftStatusReply(result)
+            : formatMinecraftTaskReply(result);
+      appendMinecraftPluginExchange(text, reply, result.ok ? 'focused' : 'concerned');
+      setStatus(result.ok ? 'Minecraft 插件已响应' : 'Minecraft 插件未完成');
+    } catch (error) {
+      const reply = `Minecraft 插件中断：${compactError(error)}`;
+      appendMinecraftPluginExchange(text, reply, 'concerned');
+      setStatus(reply);
+    } finally {
+      thinkingRef.current = false;
+      setThinking(false);
+    }
+
+    return true;
+  }
+
+  async function executeAgentToolCalls(calls: AgentTurnResponse['toolCalls'] = []): Promise<AgentToolResult[]> {
+    const allowedCalls = calls
+      .filter((call): call is AgentToolCall => Boolean(call?.toolId && AUTO_PLUGIN_TOOL_IDS.has(call.toolId)))
+      .slice(0, 3);
+
+    if (allowedCalls.length === 0) {
+      return [];
+    }
+
+    const results: AgentToolResult[] = [];
+    for (const call of allowedCalls) {
+      try {
+        const result = await window.lover.invokeAgentTool(call, false);
+        results.push(result);
+
+        let followup = '';
+        if (call.toolId === 'plugin.minecraft_task') {
+          followup = result.ok ? '' : formatMinecraftTaskReply(result);
+        } else if (call.toolId === 'plugin.query_inventory') {
+          followup = result.ok ? result.message : '我现在还查不到背包，只能先看着画面陪你。';
+        } else if (call.toolId === 'plugin.game_agent_status') {
+          followup = result.ok ? formatMinecraftStatusReply(result) : '我现在还摸不到游戏角色，只能先看着画面陪你。';
+        }
+
+        if (followup) {
+          updateMessages((current) => [...current, createMessage('assistant', followup)]);
+          if (configRef.current.voice.ttsEnabled) {
+            enqueueSpeech(followup);
+          }
+        }
+      } catch (error) {
+        const result: AgentToolResult = {
+          ok: false,
+          toolId: call.toolId,
+          callId: call.id,
+          message: compactError(error),
+          error: compactError(error)
+        };
+        results.push(result);
+        const followup = `这一步没接上：${result.message}`;
+        updateMessages((current) => [...current, createMessage('assistant', followup)]);
+        if (configRef.current.voice.ttsEnabled) {
+          enqueueSpeech(followup);
+        }
+      }
+    }
+
+    setStatus(results.every((result) => result.ok) ? '插件工具已执行' : '部分插件工具失败');
+    return results;
   }
 
   async function executeActions(actions: AutomationAction[], approved = true): Promise<void> {
@@ -3935,6 +4160,8 @@ export function App(): ReactElement {
       enqueueSpeech(response.reply);
     }
 
+    const toolResults = await executeAgentToolCalls(response.toolCalls);
+
     const assessedActions = response.actions.map(withRiskAssessment);
 
     if (assessedActions.length > 0) {
@@ -3968,7 +4195,15 @@ export function App(): ReactElement {
         setStatus('高风险动作已阻止');
       }
     } else {
-      setStatus(response.error ? `模型错误：${response.error}` : '就绪');
+      setStatus(
+        response.error
+          ? `模型错误：${response.error}`
+          : toolResults.length > 0
+            ? toolResults.every((result) => result.ok)
+              ? '插件工具已执行'
+              : '部分插件工具失败'
+            : '就绪'
+      );
     }
 
     restartListeningAfterSpeech();
@@ -3977,6 +4212,10 @@ export function App(): ReactElement {
   async function sendUtterance(text: string): Promise<void> {
     const cleanText = text.trim();
     if (!cleanText || thinkingRef.current) {
+      return;
+    }
+
+    if (await handleMinecraftPluginTextIntent(cleanText)) {
       return;
     }
 
