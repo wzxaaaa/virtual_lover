@@ -1,0 +1,96 @@
+{
+  "name": "virtual-lover",
+  "version": "0.1.0",
+  "description": "A desktop Live2D AI companion with voice, screen observation, and controlled app automation.",
+  "author": "Virtual Lover",
+  "main": "out/main/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "tsc --noEmit && electron-vite build",
+    "preview": "electron-vite preview",
+    "lint": "tsc --noEmit",
+    "check:packaged-secrets": "node scripts/check-packaged-secrets.mjs",
+    "pack": "npm run build && npm run check:packaged-secrets && electron-builder --dir",
+    "dist": "npm run build && npm run check:packaged-secrets && electron-builder --win nsis portable",
+    "dist:installer": "npm run build && npm run check:packaged-secrets && electron-builder --win nsis",
+    "dist:portable": "npm run build && npm run check:packaged-secrets && electron-builder --win portable"
+  },
+  "build": {
+    "appId": "com.virtuallover.desktop",
+    "productName": "Virtual Lover",
+    "asar": true,
+    "electronDist": "node_modules/electron/dist",
+    "directories": {
+      "output": "release"
+    },
+    "toolsets": {
+      "winCodeSign": "1.1.0"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-Setup-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Virtual Lover"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-Portable-${arch}.${ext}"
+    }
+  },
+  "config": {
+    "electron_builder_binaries_mirror": "https://npmmirror.com/mirrors/electron-builder-binaries/"
+  },
+  "dependencies": {
+    "@pixi/unsafe-eval": "^6.5.10",
+    "katex": "^0.16.22",
+    "live2dcubismcore": "^1.0.2",
+    "lucide-react": "^0.475.0",
+    "node-edge-tts": "^1.2.10",
+    "pixi-live2d-display": "^0.4.0",
+    "pixi.js": "6.5.10",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^41.5.1",
+    "electron-builder": "^26.8.1",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7"
+  },
+  "overrides": {
+    "gh-pages": "^6.3.0"
+  }
+}
