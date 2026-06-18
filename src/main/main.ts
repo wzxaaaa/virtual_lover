@@ -46,6 +46,9 @@ let petModeActive = false;
 let petVisibleBounds: PetVisibleBounds | null = null;
 let petMousePassthrough = false;
 let petMoveSequence = 0;
+let boundsEnforceTimers: Array<ReturnType<typeof setTimeout>> = [];
+let resizableBeforePetMode = true;
+let shadowBeforePetMode = true;
 
 type PetVisibleBounds = {
   left: number;
@@ -81,6 +84,11 @@ function clampWindowOrigin(value: number, min: number, max: number): number {
   }
 
   return clampWindowValue(value, min, max);
+}
+
+function clearWindowBoundsEnforceTimers(): void {
+  boundsEnforceTimers.forEach((timer) => clearTimeout(timer));
+  boundsEnforceTimers = [];
 }
 
 function normalizePetVisibleBounds(value: Partial<PetVisibleBounds> | null | undefined, windowBounds: Rectangle): PetVisibleBounds | null {
@@ -151,6 +159,8 @@ function targetBoundsForSize(window: BrowserWindow, width: number, height: numbe
 }
 
 function forceWindowBounds(window: BrowserWindow, bounds: Rectangle): void {
+  clearWindowBoundsEnforceTimers();
+
   if (window.isFullScreen()) {
     window.setFullScreen(false);
   }
@@ -170,8 +180,7 @@ function forceWindowBounds(window: BrowserWindow, bounds: Rectangle): void {
       window.setBounds(bounds, false);
     }
   };
-  setTimeout(enforceBounds, 60);
-  setTimeout(enforceBounds, 180);
+  boundsEnforceTimers = [setTimeout(enforceBounds, 60), setTimeout(enforceBounds, 180)];
 }
 
 function setPetMousePassthrough(window: BrowserWindow, enabled: boolean): void {
@@ -201,6 +210,8 @@ function moveWindowTo(window: BrowserWindow, intendedX: number, intendedY: numbe
     return currentPetMoveResult(window);
   }
 
+  clearWindowBoundsEnforceTimers();
+
   if (petModeActive && Number.isFinite(sequence)) {
     const nextSequence = Number(sequence);
     if (nextSequence < petMoveSequence) {
@@ -226,8 +237,8 @@ function moveWindowTo(window: BrowserWindow, intendedX: number, intendedY: numbe
   const minY = activePetBounds ? workArea.y - activePetBounds.top : workArea.y;
   const maxX = activePetBounds ? workArea.x + workArea.width - activePetBounds.right : workArea.x + workArea.width - currentBounds.width;
   const maxY = activePetBounds ? workArea.y + workArea.height - activePetBounds.bottom : workArea.y + workArea.height - currentBounds.height;
-  const nextX = clampWindowOrigin(intendedX, minX, maxX);
-  const nextY = clampWindowOrigin(intendedY, minY, maxY);
+  const nextX = Math.round(clampWindowOrigin(intendedX, minX, maxX));
+  const nextY = Math.round(clampWindowOrigin(intendedY, minY, maxY));
   const nextBounds = {
     ...currentBounds,
     x: nextX,
@@ -235,7 +246,7 @@ function moveWindowTo(window: BrowserWindow, intendedX: number, intendedY: numbe
   };
 
   if (currentBounds.x !== nextX || currentBounds.y !== nextY) {
-    window.setBounds(nextBounds, false);
+    window.setPosition(nextX, nextY, false);
   }
 
   const afterDisplay = screen.getDisplayMatching(nextBounds);
@@ -291,7 +302,8 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/preload.mjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      backgroundThrottling: false
     }
   });
 
@@ -569,7 +581,11 @@ ipcMain.handle('window:petMode', (_event, enabled: boolean) => {
       petVisibleBounds = null;
       petMoveSequence = 0;
       boundsBeforePetMode = boundsBeforePetMode ?? mainWindow.getBounds();
+      resizableBeforePetMode = mainWindow.isResizable();
+      shadowBeforePetMode = mainWindow.hasShadow();
       forceWindowBounds(mainWindow, targetBoundsForSize(mainWindow, PET_WINDOW_SIZE.width, PET_WINDOW_SIZE.height));
+      mainWindow.setResizable(false);
+      mainWindow.setHasShadow(false);
       mainWindow.setAlwaysOnTop(true, 'screen-saver');
       setPetMousePassthrough(mainWindow, true);
     } else {
@@ -577,7 +593,10 @@ ipcMain.handle('window:petMode', (_event, enabled: boolean) => {
       petModeActive = false;
       petVisibleBounds = null;
       petMoveSequence = 0;
+      mainWindow.setResizable(true);
+      mainWindow.setHasShadow(shadowBeforePetMode);
       forceWindowBounds(mainWindow, boundsBeforePetMode ?? targetBoundsForSize(mainWindow, NORMAL_WINDOW_SIZE.width, NORMAL_WINDOW_SIZE.height));
+      mainWindow.setResizable(resizableBeforePetMode);
       boundsBeforePetMode = null;
     }
   }
