@@ -12,6 +12,7 @@
   },
   "behavior": {
     "owner": "",
+    "ownerEntityId": null,
     "followDistanceMin": 3,
     "followDistanceMax": 5,
     "regroupDistance": 8,

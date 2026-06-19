@@ -75,6 +75,7 @@ let lastHealth = null;
 let commandFollowTimer = null;
 let commandFollowState = null;
 let commandFollowInFlight = false;
+let ownerEntityIdHint = null;
 
 function now() {
   return Date.now();
@@ -107,6 +108,11 @@ function asNumber(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+function asPositiveInteger(value, fallback = null) {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 async function loadDependencies() {
   try {
     const [mineflayerModule, pathfinderModule, minecraftDataModule, wsModule] = await Promise.all([
@@ -115,10 +121,11 @@ async function loadDependencies() {
       import('minecraft-data'),
       import('ws')
     ]);
+    const pathfinderExports = pathfinderModule.default ?? pathfinderModule;
     mineflayer = mineflayerModule.default ?? mineflayerModule;
-    pathfinderPlugin = pathfinderModule.pathfinder;
-    Movements = pathfinderModule.Movements;
-    goals = pathfinderModule.goals;
+    pathfinderPlugin = pathfinderModule.pathfinder ?? pathfinderExports.pathfinder;
+    Movements = pathfinderModule.Movements ?? pathfinderExports.Movements;
+    goals = pathfinderModule.goals ?? pathfinderExports.goals;
     minecraftData = minecraftDataModule.default ?? minecraftDataModule;
     WebSocketServer = wsModule.WebSocketServer;
   } catch (error) {
@@ -152,6 +159,7 @@ async function ensureConfig(configPath) {
     },
     behavior: {
       owner: String(parsed.behavior?.owner || ''),
+      ownerEntityId: asPositiveInteger(parsed.behavior?.ownerEntityId, null),
       followDistanceMin: asNumber(parsed.behavior?.followDistanceMin, 3),
       followDistanceMax: asNumber(parsed.behavior?.followDistanceMax, 5),
       regroupDistance: asNumber(parsed.behavior?.regroupDistance, 8),
@@ -221,6 +229,9 @@ function playerState(name, player) {
     updatedAt: now(),
     name,
     visible: Boolean(entity),
+    entityId: entity?.id ?? undefined,
+    synthetic: Boolean(player?.synthetic),
+    source: player?.source,
     distance: entity ? Number(distanceToBot(entity)?.toFixed(2)) : null,
     position: vecToPlain(entity?.position),
     health: typeof entity?.health === 'number' ? entity.health : undefined,
@@ -241,6 +252,64 @@ function isPlayerEntity(entity) {
   const username = textValue(entity.username || entity.profile?.name).trim();
   if (username && username !== bot?.username) return true;
   return Object.values(bot?.players || {}).some((player) => player?.entity === entity);
+}
+
+function configuredOwnerEntityId() {
+  return asPositiveInteger(config?.behavior?.ownerEntityId, null);
+}
+
+function ownerSurrogateEntity() {
+  const entityId = ownerEntityIdHint || configuredOwnerEntityId();
+  if (!entityId || !bot?.entities) return null;
+  const entity = bot.entities[entityId];
+  if (!entity || entity === bot.entity || !entity.position) return null;
+  return entity;
+}
+
+function ownerSurrogateTarget() {
+  const owner = String(config?.behavior?.owner || '').trim();
+  const entity = ownerSurrogateEntity();
+  if (!owner || !entity) return null;
+  return {
+    name: owner,
+    player: { entity, synthetic: true, source: ownerEntityIdHint ? 'detected_owner_entity' : 'configured_owner_entity' },
+    distance: distanceToBot(entity) ?? null,
+    synthetic: true
+  };
+}
+
+function isUnnamedNearEntity(entity, maxDistance) {
+  if (!entity || entity === bot?.entity || !entity.position) return false;
+  if (isPlayerEntity(entity)) return false;
+  if ((distanceToBot(entity) ?? 9999) > maxDistance) return false;
+  const labels = [
+    entity.type,
+    entity.kind,
+    entity.name,
+    entity.username,
+    entity.displayName,
+    entity.profile?.name
+  ].map((value) => textValue(value).trim()).filter(Boolean);
+  return labels.length === 0;
+}
+
+function detectOwnerSurrogateTarget(reason = 'nearby') {
+  const owner = String(config?.behavior?.owner || '').trim();
+  if (!owner || !bot?.entities) return null;
+
+  const existing = ownerSurrogateTarget();
+  if (existing) return existing;
+
+  const maxDistance = Math.max(1.5, Math.min(4, asNumber(config.behavior.followDistanceMin, 3)));
+  const candidate = Object.values(bot.entities)
+    .filter((entity) => isUnnamedNearEntity(entity, maxDistance))
+    .map((entity) => ({ entity, distance: distanceToBot(entity) ?? 9999 }))
+    .sort((a, b) => a.distance - b.distance)[0]?.entity;
+
+  if (!candidate?.id) return null;
+  ownerEntityIdHint = candidate.id;
+  log(`Using unnamed nearby entity ${candidate.id} as owner "${owner}" surrogate after ${reason}.`);
+  return ownerSurrogateTarget();
 }
 
 function playerTargets() {
@@ -269,6 +338,20 @@ function playerTargets() {
     }
     seen.add(key);
     targets.push({ name, player: { entity } });
+  }
+
+  const surrogate = ownerSurrogateTarget();
+  if (surrogate) {
+    const key = surrogate.name.toLowerCase();
+    const existing = targets.find((target) => target.name.toLowerCase() === key);
+    if (existing && !existing.player?.entity) {
+      existing.player = { ...(existing.player || {}), ...surrogate.player };
+      existing.synthetic = true;
+      existing.distance = surrogate.distance;
+    } else if (!seen.has(key)) {
+      seen.add(key);
+      targets.unshift(surrogate);
+    }
   }
 
   return targets;
@@ -345,7 +428,10 @@ async function tryTeleportToOwnerTarget() {
   const before = bot.entity.position?.clone?.();
   await sendGameChat(`/tp ${bot.username || config.minecraft.username} ${resolvedOwner}`);
   await wait(900);
-  const target = findOwnerOrNearestPlayer();
+  let target = findOwnerOrNearestPlayer();
+  if (!target?.player?.entity) {
+    target = detectOwnerSurrogateTarget('teleport');
+  }
   const moved = Boolean(before && bot.entity?.position && bot.entity.position.distanceTo(before) > 1);
   return { owner: resolvedOwner, moved, target };
 }
@@ -805,14 +891,24 @@ async function commandFollowTick(reason = 'interval') {
         owner: resolvedOwner
       };
     }
-    const visibleTarget = findOwnerOrNearestPlayer();
+    let visibleTarget = findOwnerOrNearestPlayer();
+    if (!visibleTarget?.player?.entity) {
+      visibleTarget = detectOwnerSurrogateTarget('command follow teleport');
+    }
 
     if (visibleTarget?.player?.entity) {
       clearCommandFollow();
       const followDistance = Math.max(1, config.behavior.followDistanceMax);
       pathState = {
         status: 'following',
-        target: { type: 'player', name: visibleTarget.name, distance: visibleTarget.distance ?? null },
+        target: {
+          type: 'player',
+          name: visibleTarget.name,
+          entityId: visibleTarget.player.entity?.id ?? null,
+          synthetic: Boolean(visibleTarget.player.synthetic || visibleTarget.synthetic),
+          source: visibleTarget.player.source,
+          distance: visibleTarget.distance ?? null
+        },
         updatedAt: now()
       };
       bot.pathfinder.setGoal(new goals.GoalFollow(visibleTarget.player.entity, followDistance), true);
@@ -1003,7 +1099,14 @@ async function followPlayer() {
   const followDistance = Math.max(1, config.behavior.followDistanceMax);
   pathState = {
     status: 'following',
-    target: { type: 'player', name: target.name, distance: target.distance ?? null },
+    target: {
+      type: 'player',
+      name: target.name,
+      entityId: target.player.entity?.id ?? null,
+      synthetic: Boolean(target.player.synthetic || target.synthetic),
+      source: target.player.source,
+      distance: target.distance ?? null
+    },
     updatedAt: now()
   };
   bot.pathfinder.setGoal(new goals.GoalFollow(target.player.entity, followDistance), true);
@@ -1034,7 +1137,15 @@ async function goNearPlayer() {
   const pos = target.player.entity.position;
   pathState = {
     status: 'moving',
-    target: { type: 'player', name: target.name, position: vecToPlain(pos), distance: target.distance ?? null },
+    target: {
+      type: 'player',
+      name: target.name,
+      entityId: target.player.entity?.id ?? null,
+      synthetic: Boolean(target.player.synthetic || target.synthetic),
+      source: target.player.source,
+      position: vecToPlain(pos),
+      distance: target.distance ?? null
+    },
     updatedAt: now()
   };
   publishStatus();

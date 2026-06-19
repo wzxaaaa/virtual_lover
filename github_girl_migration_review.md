@@ -220,8 +220,9 @@
 - `P17` 已补第三十五段首次会合兜底：实机继续发现 `follow ... stop or wait if unsafe` 里包含 `stop`，需要把“主要动作”与“安全条件”分开解析；本轮新增 `hasPrimaryActionIntent()`，当任务包含 follow/挖掘/攻击/聊天等主动作时，`stop or wait if unsafe` 不再覆盖主动作。另为当前 LAN 环境中 `bot.players` 不稳定的问题补 `playerTargets()`，会从 `bot.players` 和 `bot.entities` 的 player 实体合并寻找 Owner/最近玩家；若仍看不到 Owner 但配置了 Owner，则 follow/regroup 会先自动发送 `/tp VirtualLoverBot <Owner>` 做首次会合，传送成功但仍未拿到实体时把路径状态标为 `waiting_for_player / teleported_near_owner`。适配点：这解决“先把她带到身边”的体验；真正连续步行跟随仍要求 mineflayer 能看到玩家实体坐标。
 
 - `P17` 已补第三十六段真实联机跟随兜底：实机验证当前 LAN/离线世界里游戏 Tab 能看到 `Steve` 和 `VirtualLoverBot`，但 mineflayer 仍可能回报 `knownPlayers: [] / nearbyPlayers: []`，导致 `/tp` 一次后仍无法进入 `GoalFollow`。本轮把玩家实体识别放宽到 `username/profile/kind`，避免非标准 `entity.type` 漏识别；同时新增 `command_follow_fallback` 能力和 `commandFollow` 状态。当 follow 看不到 Owner 实体但配置了 Owner 时，starter 会进入 `command_following`，按 `behavior.commandFollowIntervalMs` 周期发送 `/tp <bot> <Owner>`，并在后续一旦看到真实玩家实体时自动切回 pathfinder `GoalFollow`。停止、断线、死亡或非跟随任务会清理该循环。适配点：这是当前 LAN 环境下让“跟着我”真的持续生效的保守兜底；它依赖世界允许 bot 执行 `/tp`，且不是自然步行保持 3-5 格，后续仍应优先让外部 mc-agent 稳定输出玩家实体坐标。
+- `P17` 已补第三十七段匿名 Owner 实体跟随：实机抓取 `debug_entities` 发现当前 LAN/离线世界里 `Steve` 不出现在 `bot.players`，但会以 `id=319`、无 `type/name/username`、`size=0x0` 的原始实体贴近 bot。starter 新增 `entity_debug` 能力和 `behavior.ownerEntityId`，并把指定实体包装成 `synthetic` Owner；`follow me` 现在可直接进入 pathfinder `GoalFollow`，状态显示 `trackedPlayer.name=Steve / entityId=319 / synthetic=true / path.status=following / commandFollow=null`，不再依赖周期 `/tp`。同时修复 `mineflayer-pathfinder` ESM 下 `goals` 位于 default export 的导入兼容问题。适配点：这是对当前世界的实体映射兜底；若重进世界实体 id 改变，可重新用 `debug_entities` 找最近的匿名 Owner 实体，或依赖后续自动贴身匿名实体探测。
 
-当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.86%，完整游戏 Agent 自主玩法约 95.2%。
+当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.9%，完整游戏 Agent 自主玩法约 95.4%。
 
 ## Agent / Minecraft 剩余缺口
 
