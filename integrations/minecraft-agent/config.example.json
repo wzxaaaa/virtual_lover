@@ -1,0 +1,22 @@
+{
+  "bridge": {
+    "host": "127.0.0.1",
+    "port": 48909
+  },
+  "minecraft": {
+    "host": "127.0.0.1",
+    "port": 55916,
+    "username": "VirtualLoverBot",
+    "auth": "offline",
+    "version": false
+  },
+  "behavior": {
+    "owner": "",
+    "followDistanceMin": 3,
+    "followDistanceMax": 5,
+    "regroupDistance": 8,
+    "statusIntervalMs": 2000,
+    "maxDigBlocksPerTask": 4,
+    "searchRadius": 32
+  }
+}

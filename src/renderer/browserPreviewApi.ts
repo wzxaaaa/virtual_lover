@@ -16,6 +16,7 @@ import {
   type MemoryState,
   type MinecraftAgentEvent,
   type MinecraftAgentInventoryResponse,
+  type MinecraftAgentStarterInfo,
   type MinecraftAgentStatus,
   type MinecraftAgentTaskRequest,
   type MinecraftAgentTaskResult,
@@ -257,6 +258,16 @@ export function installBrowserPreviewApi(): void {
       toolId: call.toolId,
       callId: call.id,
       message: 'Browser preview cannot invoke desktop tools.'
+    }),
+    getMinecraftAgentStarterInfo: async (): Promise<MinecraftAgentStarterInfo> => ({
+      available: false,
+      rootDir: 'integrations/minecraft-agent',
+      startScript: 'integrations/minecraft-agent/start-windows.cmd',
+      packageJson: 'integrations/minecraft-agent/package.json',
+      readmePath: 'integrations/minecraft-agent/README.md',
+      installCommand: 'cd integrations/minecraft-agent && npm install',
+      startCommand: 'cd integrations/minecraft-agent && npm start',
+      error: 'Browser preview cannot access local filesystem.'
     }),
     getMinecraftAgentStatus: async (): Promise<MinecraftAgentStatus> => ({
       ...previewMinecraftAgentStatus(),

@@ -17,7 +17,7 @@ import {
   type MarketplaceItem,
   type MarketplaceTab
 } from '../shared/marketplace';
-import type { AppConfig, MinecraftAgentStatus } from '../shared/types';
+import type { AppConfig, MinecraftAgentStarterInfo, MinecraftAgentStatus } from '../shared/types';
 import { openExternalUrl } from './openExternal';
 
 interface MarketplacePanelProps {
@@ -102,6 +102,7 @@ function MinecraftAgentMarketplaceConfig({
   updateAgent: UpdateAgentConfig;
 }): ReactElement {
   const [agentStatus, setAgentStatus] = useState<MinecraftAgentStatus | null>(null);
+  const [starterInfo, setStarterInfo] = useState<MinecraftAgentStarterInfo | null>(null);
   const [statusLoading, setStatusLoading] = useState(false);
   const [launchMessage, setLaunchMessage] = useState('');
 
@@ -116,6 +117,41 @@ function MinecraftAgentMarketplaceConfig({
     } finally {
       setStatusLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    if (typeof window.lover.getMinecraftAgentStarterInfo !== 'function') {
+      return () => {
+        active = false;
+      };
+    }
+
+    window.lover
+      .getMinecraftAgentStarterInfo()
+      .then((info) => {
+        if (active) {
+          setStarterInfo(info);
+        }
+      })
+      .catch((error) => {
+        if (active) {
+          setStarterInfo({
+            available: false,
+            rootDir: 'integrations/minecraft-agent',
+            startScript: 'integrations/minecraft-agent/start-windows.cmd',
+            packageJson: 'integrations/minecraft-agent/package.json',
+            readmePath: 'integrations/minecraft-agent/README.md',
+            installCommand: 'cd integrations/minecraft-agent && npm install',
+            startCommand: 'cd integrations/minecraft-agent && npm start',
+            error: error instanceof Error ? error.message : 'Minecraft Agent starter info unavailable.'
+          });
+        }
+      });
+
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -167,8 +203,22 @@ function MinecraftAgentMarketplaceConfig({
     openExternalUrl(adminUrl);
   };
 
+  const openStarterDirectory = async (): Promise<void> => {
+    if (!starterInfo?.rootDir) {
+      setLaunchMessage('Minecraft Agent starter path is not ready yet.');
+      return;
+    }
+
+    try {
+      const result = await window.lover.openPath(starterInfo.rootDir);
+      setLaunchMessage(result.message);
+    } catch (error) {
+      setLaunchMessage(error instanceof Error ? error.message : 'Failed to open Minecraft Agent starter directory.');
+    }
+  };
+
   const launchAgent = async (): Promise<void> => {
-    const launchPath = config.agent.minecraftAgentLaunchPath.trim();
+    const launchPath = config.agent.minecraftAgentLaunchPath.trim() || starterInfo?.startScript || '';
     if (!launchPath) {
       setLaunchMessage('先填写“启动mc-agent.bat”的完整路径。');
       return;
@@ -196,6 +246,18 @@ function MinecraftAgentMarketplaceConfig({
     <div className="marketplace-config minecraft-agent-config">
       <div className="minecraft-agent-note">
         mc-agent 是她在 Minecraft 里的身体：本应用负责对话和下发任务，mc-agent 使用独立 Minecraft 账号进你的世界并控制 bot 角色。
+      </div>
+
+      <div className="minecraft-agent-starter">
+        <span>本地 starter</span>
+        <strong>{starterInfo?.available ? starterInfo.rootDir : starterInfo?.error || '读取中'}</strong>
+        {starterInfo?.available ? (
+          <small>
+            {starterInfo.installCommand}
+            {' / '}
+            {starterInfo.startCommand}
+          </small>
+        ) : null}
       </div>
 
       <div className="minecraft-agent-status" aria-live="polite">
@@ -262,6 +324,10 @@ function MinecraftAgentMarketplaceConfig({
         <button className="minecraft-agent-button" type="button" onClick={openAdminPanel}>
           <ExternalLink size={15} />
           管理面板
+        </button>
+        <button className="minecraft-agent-button" type="button" onClick={() => void openStarterDirectory()}>
+          <ExternalLink size={15} />
+          打开本地 starter
         </button>
         <button className="minecraft-agent-button" type="button" onClick={() => void launchAgent()}>
           <Play size={15} />

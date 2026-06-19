@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, screen, session, shell } from 'electron';
 import type { Rectangle } from 'electron';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { cancelAgentTask, listAgentTaskEvents, listAgentTasks, loadPersistedAgentTasks, onAgentTaskEvent, runAutomationTask } from './agentTasks';
 import { executeAutomationActionTool, invokeAgentTool, listAgentTools } from './agentTools';
@@ -24,6 +25,7 @@ import {
   AppConfig,
   AutomationAction,
   DesktopDisplayInfo,
+  MinecraftAgentStarterInfo,
   MinecraftAgentTaskRequest,
   OpenPathResult,
   PetCursorPosition,
@@ -41,6 +43,7 @@ const COMPACT_WINDOW_SIZE = { width: 390, height: 560 };
 const PET_WINDOW_SIZE = { width: 520, height: 640 };
 const NORMAL_WINDOW_SIZE = { width: 1080, height: 740 };
 const HEARTBEAT_INTERVAL_MS = 60_000;
+const MINECRAFT_AGENT_STARTER_RELATIVE_DIR = path.join('integrations', 'minecraft-agent');
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let boundsBeforePetMode: Rectangle | null = null;
 let petModeActive = false;
@@ -73,6 +76,31 @@ function normalizeExternalUrl(url: string): string | null {
   }
 
   return parsed.toString();
+}
+
+function minecraftAgentStarterInfo(): MinecraftAgentStarterInfo {
+  const candidateRoots = [
+    path.join(process.cwd(), MINECRAFT_AGENT_STARTER_RELATIVE_DIR),
+    path.join(app.getAppPath(), MINECRAFT_AGENT_STARTER_RELATIVE_DIR),
+    process.resourcesPath ? path.join(process.resourcesPath, MINECRAFT_AGENT_STARTER_RELATIVE_DIR) : ''
+  ].filter(Boolean);
+
+  const rootDir = candidateRoots.find((candidate) => existsSync(path.join(candidate, 'package.json'))) ?? candidateRoots[0];
+  const startScript = path.join(rootDir, 'start-windows.cmd');
+  const packageJson = path.join(rootDir, 'package.json');
+  const readmePath = path.join(rootDir, 'README.md');
+  const available = existsSync(packageJson) && existsSync(startScript);
+
+  return {
+    available,
+    rootDir,
+    startScript,
+    packageJson,
+    readmePath,
+    installCommand: `cd /d "${rootDir}" && npm install`,
+    startCommand: `cd /d "${rootDir}" && npm start`,
+    error: available ? undefined : 'Bundled Minecraft Agent starter is missing.'
+  };
 }
 
 function clampWindowValue(value: number, min: number, max: number): number {
@@ -558,6 +586,8 @@ ipcMain.handle('agent:tools:invoke', async (_event, call: AgentToolCall, approve
   const config = await loadConfig();
   return invokeAgentTool(config, call, Boolean(approved));
 });
+
+ipcMain.handle('minecraft:agentStarterInfo', async () => minecraftAgentStarterInfo());
 
 ipcMain.handle('minecraft:agentStatus', async () => {
   const config = await loadConfig();

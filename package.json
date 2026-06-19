@@ -18,6 +18,9 @@
     "smoke:minecraft-agent:mock:chat": "node scripts/smoke-minecraft-agent.mjs --mock --scenario chat --chat \"Hello from smoke\" --timeout 5",
     "smoke:minecraft-agent:service": "node scripts/smoke-minecraft-agent-service.mjs",
     "smoke:minecraft-agent:renderer": "node scripts/smoke-minecraft-renderer.mjs",
+    "minecraft-agent:install": "node scripts/minecraft-agent-run.mjs install",
+    "minecraft-agent:start": "node scripts/minecraft-agent-run.mjs start",
+    "minecraft-agent:check": "node scripts/minecraft-agent-run.mjs check",
     "check:packaged-secrets": "node scripts/check-packaged-secrets.mjs",
     "pack": "npm run build && npm run check:packaged-secrets && electron-builder --dir",
     "dist": "npm run build && npm run check:packaged-secrets && electron-builder --win nsis portable",
@@ -37,6 +40,13 @@
     },
     "files": [
       "out/**/*",
+      "integrations/minecraft-agent/package.json",
+      "integrations/minecraft-agent/README.md",
+      "integrations/minecraft-agent/config.example.json",
+      "integrations/minecraft-agent/start-windows.cmd",
+      "integrations/minecraft-agent/src/**/*",
+      "!integrations/minecraft-agent/node_modules/**/*",
+      "!integrations/minecraft-agent/config.json",
       "package.json"
     ],
     "win": {

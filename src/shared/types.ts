@@ -132,6 +132,17 @@ export interface OpenPathResult {
   message: string;
 }
 
+export interface MinecraftAgentStarterInfo {
+  available: boolean;
+  rootDir: string;
+  startScript: string;
+  packageJson: string;
+  readmePath: string;
+  installCommand: string;
+  startCommand: string;
+  error?: string;
+}
+
 export interface DoubaoSpeechConfig {
   baseUrl: string;
   apiKey: string;

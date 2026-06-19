@@ -2092,6 +2092,36 @@ body.neko-model-dragging .pet-floating-toolbar * {
   word-break: break-word;
 }
 
+.minecraft-agent-starter {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid rgba(38, 170, 154, 0.22);
+  border-radius: 8px;
+  background: rgba(38, 170, 154, 0.08);
+  color: #303946;
+  font-size: 12px;
+}
+
+.minecraft-agent-starter span {
+  color: #0f6d64;
+  font-weight: 900;
+}
+
+.minecraft-agent-starter strong,
+.minecraft-agent-starter small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minecraft-agent-starter small {
+  color: #687386;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
 .minecraft-agent-status {
   min-width: 0;
   display: grid;
