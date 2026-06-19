@@ -11,6 +11,7 @@
     "preview": "electron-vite preview",
     "lint": "tsc --noEmit",
     "smoke:minecraft-agent": "node scripts/smoke-minecraft-agent.mjs",
+    "smoke:minecraft-agent:status": "node scripts/smoke-minecraft-agent.mjs --status-only",
     "smoke:minecraft-agent:mock": "node scripts/smoke-minecraft-agent.mjs --mock --timeout 5",
     "smoke:minecraft-agent:mock:stale": "node scripts/smoke-minecraft-agent.mjs --mock --scenario stale-task-id --timeout 5",
     "smoke:minecraft-agent:mock:rich": "node scripts/smoke-minecraft-agent.mjs --mock --scenario rich-state --chat \"I am with you\" --timeout 5",

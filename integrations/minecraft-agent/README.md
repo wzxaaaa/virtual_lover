@@ -19,6 +19,14 @@ The bridge listens on `ws://127.0.0.1:48909` by default. Keep the terminal open 
 
 You can also open **Market -> MCP -> Minecraft Agent -> Configure** in Virtual Lover. The panel can generate `config.json`, save the LAN port / bot username / auth mode, show Node/npm/dependency diagnostics, keep the app WebSocket URL in sync with the starter bridge, install dependencies, start/stop the bundled starter, display recent startup logs, recognize `Local game hosted on port XXXXX`, turn common startup errors into repair hints, and confirm whether the bot account has actually joined the Minecraft world.
 
+For a command-line join check, run this from the desktop app root while the starter is running:
+
+```bash
+npm run smoke:minecraft-agent:status
+```
+
+The smoke output includes `world_join`, live inventory, and the last known position/dimension when the agent reports them.
+
 ## Accounts
 
 For LAN/offline testing, `auth: "offline"` and `username: "VirtualLoverBot"` are enough when your server accepts offline players.

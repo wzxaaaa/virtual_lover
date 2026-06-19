@@ -2312,6 +2312,15 @@ body.neko-model-dragging .pet-floating-toolbar * {
   gap: 6px;
 }
 
+.minecraft-agent-status-controls {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .minecraft-agent-status-badge {
   min-height: 26px;
   display: inline-flex;

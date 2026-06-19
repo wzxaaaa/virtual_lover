@@ -213,8 +213,9 @@
 - `P17` 已补第二十八段 starter 进程管理/日志回流：在保留 `github_girl` quickstart “用户可自己启动外部 mc-agent”设计的同时，本项目因为已经内置 `integrations/minecraft-agent`，新增 `src/main/minecraftAgentStarterProcess.ts` 作为独立主进程模块，负责 `npm install`、`npm start`、停止进程树、隐藏启动窗口、捕获 stdout/stderr、识别常见 error/warn 日志并通过 `minecraft:agentStarterEvent` 推给 renderer。preload 新增 `getMinecraftAgentStarterProcessState()`、`runMinecraftAgentStarterProcessAction()`、`onMinecraftAgentStarterEvent()`；市场 Minecraft Agent 配置页新增“安装依赖 / 启动内置 starter / 停止”和最近启动日志面板。适配点：`github_girl` 不内置进程管理，本轮属于把其管理面板思路落到当前 Electron 内置 starter；仍未做真实 Minecraft LAN 世界验证。
 - `P17` 已补第二十九段 LAN 端口识别与启动错误结构化：继续贴合 `github_girl` quickstart 里“Open to LAN 后看聊天框端口、排错先看黑窗口最后几行”的设计，市场 Minecraft Agent 配置页新增“LAN 端口提示”输入框，能识别 `Local game hosted on port XXXXX`、`hosted on port XXXXX`、中文“端口 XXXXX”和直接端口数字，识别后自动写入 starter `minecraft.port` 并保存。`minecraftAgentStarterProcess` 现在会把 stdout/stderr 中的 `EADDRINUSE`、`ECONNREFUSED/connection refused/timed out`、`unsupported protocol/version mismatch/outdated client/server`、`auth/microsoft/invalid session/login failed`、`kicked/whitelist/banned`、`cannot find module/missing dependencies` 等日志归类成结构化 `issues`，市场面板展示标题、修复动作和原始日志。适配点：目前仍是基于日志文本的本地规则，不是完整 mindserver settings_spec，也还没有自动从 Minecraft 客户端窗口 OCR/剪贴板读取端口。
 - `P17` 已补第三十段自动进服确认/状态闭环：对齐 `github_girl` quickstart 第 5 步“MC 聊天框看到 Neko joined the game；看不到就刷新状态/看黑窗口”的验证逻辑，本项目把这一步机器化。`MinecraftAgentStatus` 新增 `joinState`，从 `agent_status.connected/worldJoin`、`Minecraft bot spawned as ...`、`joined the game`、`kicked/whitelist/banned`、`Minecraft bot disconnected/error` 等日志和 alert 中推断 `unknown/agent_disconnected/joining/joined/left/rejected/error`；内置 `integrations/minecraft-agent` 新增 `world_join_state` 能力并在 `agent_status.worldJoin` 里主动回传 bot 名、host、port、dimension 和进服阶段；市场 Minecraft Agent 配置页新增“第二账号已进服/正在进服/被拒绝/异常”等状态徽标和明细。服务级 smoke、renderer IPC/preload smoke 与协议 mock 都加入 `worldJoin` 回放和断言。适配点：仍未接真实 Minecraft LAN 世界做端到端实测，也还没有从 MC 客户端 OCR/剪贴板自动读取端口。
+- `P17` 已补第三十一段应用内联机验证入口：继续照 `github_girl` quickstart “刷新状态/看黑窗口最后几行”的排错方式，但把用户要手动串起来的检查变成市场配置页里的“验证联机”。该动作会刷新 `MinecraftAgentStatus`、读取 `joinState`、在 mc-agent bridge 已连上时发起 live `query_inventory`，最后把“第二账号阶段 + bot/host/port/维度/坐标 + live 背包是否可读 + 下一步建议”写回配置页消息区。`scripts/smoke-minecraft-agent.mjs` 同步增强 `worldJoin` 摘要输出，并新增 `npm run smoke:minecraft-agent:status` 用于真实 starter 运行时只做状态/进服/背包轻量回放，不派任务。适配点：这仍不是自动打开 Minecraft 或自动进 LAN 世界；真实世界里的跟随/砍树/聊天还需要用户实际开 MC 后跑联机回放验证。
 
-当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.5%，完整游戏 Agent 自主玩法约 95%。
+当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.6%，完整游戏 Agent 自主玩法约 95%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -237,12 +238,12 @@
 4. **长期目标规划**：已有 `activeGoal` 和 `planState` 保存这一局持续目标、当前步骤、最近步骤、连续受阻次数，并进入空闲续玩判断；状态层也能接住路径/目标/危险反馈。还缺真正的多阶段 plan 生成、checkpoint 持久化、失败恢复策略和资源预算。
 5. **多玩家协作语义**：已补跟随半径、别挡路、保护、带路、等待、分工采集、共享箱子等任务/prompt/status 规则，并通过 task frame `client.collaboration` 把 contract 明确传给外部 agent；还缺外部 mc-agent 真实物理层的“不挡路”寻路策略、共享容器锁/物品预定、稳定用户身份映射和基于用户视线方向的协作细节。
 6. **游戏内自然沟通**：已补基础聊天桥，能缓存游戏聊天并通过 `plugin.minecraft_chat` 向外部 mc-agent 发送短句；还缺外部 mc-agent 对聊天帧的稳定协议确认、游戏内用户身份映射，以及把游戏内聊天和桌面对话做更完整的去重/合并。
-7. **启动与连接自动化**：市场里已有下载、路径、管理面板、本地 starter 诊断、配置保存、依赖安装、启动/停止、日志回流、LAN 端口识别、常见启动错误结构化提示和“第二账号是否真的进服”的自动确认；还不能自动从 Minecraft 客户端窗口 OCR/剪贴板抓端口，也还没有真实 LAN 世界联机回放。
-8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat/worldJoin 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert/进服状态回放；也已有主进程服务级 smoke 覆盖 live inventory、busy、overwrite 防抖、匹配完成、聊天、断线、进服状态和事件回流；Electron renderer IPC/preload smoke 能验证 renderer 通过 `window.lover` 拿到状态、协议、背包、任务、进服状态与事件。还缺完整聊天 UI 视觉 E2E，以及接真实 Minecraft/mineflayer 的联机回放。
+7. **启动与连接自动化**：市场里已有下载、路径、管理面板、本地 starter 诊断、配置保存、依赖安装、启动/停止、日志回流、LAN 端口识别、常见启动错误结构化提示、“第二账号是否真的进服”的自动确认和一键联机验证报告；还不能自动从 Minecraft 客户端窗口 OCR/剪贴板抓端口，也还没有真实 LAN 世界联机回放。
+8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat/worldJoin 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert/进服状态回放；也已有主进程服务级 smoke 覆盖 live inventory、busy、overwrite 防抖、匹配完成、聊天、断线、进服状态和事件回流；Electron renderer IPC/preload smoke 能验证 renderer 通过 `window.lover` 拿到状态、协议、背包、任务、进服状态与事件。新增 `smoke:minecraft-agent:status` 可用于真实 starter 的轻量状态回放。还缺完整聊天 UI 视觉 E2E，以及接真实 Minecraft/mineflayer 的完整动作联机回放。
 
 ### 下一步建议顺序
 
-1. 先做 **mc-agent starter 真实联机回放**：在本地 Minecraft LAN 世界里跑 `integrations/minecraft-agent`，补 smoke/诊断日志，确认第二账号能稳定进世界、跟随、挖木头、聊天、回传背包、进服状态和任务完成。
+1. 先做 **mc-agent starter 真实动作联机回放**：在本地 Minecraft LAN 世界里跑 `integrations/minecraft-agent`，用市场“验证联机”和 `npm run smoke:minecraft-agent:status` 先确认进服，再派跟随、挖木头、聊天、回传背包和任务完成。
 2. 再补 **完整聊天 UI 视觉 E2E**，验证真实 App 聊天窗口里 Minecraft 状态、任务、协议能力、进服状态和事件能完整显示。
 3. 再补 **自动端口抓取**：从剪贴板/OCR/窗口标题或用户粘贴的 Minecraft LAN 提示里更自动地抓取端口并提示重启 starter。
 4. 然后做 **全局 message-plane**，让 Minecraft 和其他 Agent 能共享 `read/respond`、priority、coalesce。

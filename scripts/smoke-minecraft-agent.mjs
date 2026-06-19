@@ -687,6 +687,60 @@ function summarizeInventory(frame) {
   return items.length > 0 ? items.join(', ') : 'empty';
 }
 
+function summarizeWorldJoin(frame) {
+  if (!frame || typeof frame !== 'object') {
+    return null;
+  }
+
+  const raw =
+    frame.worldJoin && typeof frame.worldJoin === 'object'
+      ? frame.worldJoin
+      : frame.world_join && typeof frame.world_join === 'object'
+        ? frame.world_join
+        : frame.joinState && typeof frame.joinState === 'object'
+          ? frame.joinState
+          : frame;
+  const phase =
+    typeof raw.phase === 'string'
+      ? raw.phase
+      : raw.connectedToWorld === true || raw.connected === true || raw.joined === true
+        ? 'joined'
+        : raw.connectedToWorld === false || raw.connected === false
+          ? 'joining'
+          : 'unknown';
+  const username = raw.username || raw.botUsername || frame.username || frame.botUsername || '';
+  const host = raw.host || raw.minecraftHost || '';
+  const port = raw.port || raw.minecraftPort || '';
+  const dimension = raw.dimension || frame.dimension || frame.world || '';
+  const detail = raw.detail || raw.message || raw.reason || '';
+
+  return {
+    phase,
+    connectedToWorld: phase === 'joined' || raw.connectedToWorld === true || raw.connected === true,
+    username: username ? String(username) : '',
+    host: host ? String(host) : '',
+    port: port ? Number(port) : null,
+    dimension: dimension ? String(dimension) : '',
+    detail: detail ? String(detail).slice(0, 180) : ''
+  };
+}
+
+function formatWorldJoin(join) {
+  if (!join) {
+    return 'not reported';
+  }
+  const endpoint = [join.host, join.port].filter(Boolean).join(':');
+  return [
+    join.phase,
+    join.username ? `user=${join.username}` : '',
+    endpoint ? `target=${endpoint}` : '',
+    join.dimension ? `dimension=${join.dimension}` : '',
+    join.detail
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 function looksBlocked(text) {
   return /not found|could not|couldn't|unable|failed|no path|blocked|missing|cannot|can't|unavailable|no target|target not/i.test(text);
 }
@@ -719,6 +773,7 @@ async function main() {
   const screenshots = [];
   let latestInventory = null;
   let latestAgentStatus = null;
+  let latestWorldJoin = null;
   let latestChat = null;
   let latestAlert = null;
   let finished = null;
@@ -763,11 +818,15 @@ async function main() {
 
       if (type === 'agent_status') {
         latestAgentStatus = frame;
+        latestWorldJoin = summarizeWorldJoin(frame) || latestWorldJoin;
         const position = frame.position || frame.pos || frame.location || null;
         const place = [frame.dimension || frame.world, frame.biome].filter(Boolean).join('/');
         console.log(
           `[mc-smoke] agent_status${place ? ` place=${place}` : ''}${position ? ` pos=${JSON.stringify(position)}` : ''}`
         );
+        if (latestWorldJoin) {
+          console.log(`[mc-smoke] world_join: ${formatWorldJoin(latestWorldJoin)}`);
+        }
       }
 
       if (type === 'chat') {
@@ -840,6 +899,7 @@ async function main() {
     counts,
     scenario: options.mock ? options.scenario : 'real-agent',
     inventory: latestInventory ? summarizeInventory(latestInventory) : 'not received',
+    worldJoin: latestWorldJoin ? formatWorldJoin(latestWorldJoin) : 'not reported',
     richStatus: latestAgentStatus
       ? {
           health: latestAgentStatus.health ?? latestAgentStatus.hp ?? null,

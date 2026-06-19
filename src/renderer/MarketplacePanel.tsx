@@ -26,6 +26,7 @@ import type {
   MinecraftAgentStarterProcessAction,
   MinecraftAgentStarterProcessState,
   MinecraftAgentJoinState,
+  MinecraftAgentInventoryResponse,
   MinecraftAgentStatus
 } from '../shared/types';
 import { openExternalUrl } from './openExternal';
@@ -246,6 +247,39 @@ function minecraftJoinDetail(
   return joinState.detail || `${username} 还没有确认进入 ${host}:${port}`;
 }
 
+function minecraftInventoryBrief(response: MinecraftAgentInventoryResponse | null): string {
+  if (!response) {
+    return '没有发起背包查询';
+  }
+
+  if (!response.ok || response.source !== 'live') {
+    return response.error || response.summary || '没有收到 live 背包响应';
+  }
+
+  const items = Object.entries(response.inventory)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name, count]) => `${name}x${count}`);
+  return items.length ? items.join(', ') : '背包为空';
+}
+
+function minecraftJoinAdvice(joinState: MinecraftAgentJoinState | null | undefined, status: MinecraftAgentStatus | null): string {
+  if (joinState?.phase === 'joined') {
+    return '可以开始让她跟随、砍树、查背包或做下一步任务。';
+  }
+  if (!status?.connected || joinState?.phase === 'agent_disconnected') {
+    return '先启动内置 starter，确认 Bridge Port 和 MC Agent WS 都是 48909。';
+  }
+  if (joinState?.phase === 'rejected') {
+    return '检查 whitelist、offline-mode、auth 模式和 bot 账号是否允许进入这个世界。';
+  }
+  if (joinState?.phase === 'error' || joinState?.phase === 'left') {
+    return '看上方启动日志最后几行，优先检查 LAN 端口、MC 版本和账号登录。';
+  }
+  return '确认 Minecraft 已 Open to LAN，并把聊天框里的随机 LAN 端口保存到 starter 配置后重启。';
+}
+
 function MarketplaceStatusBadge({ item }: { item: MarketplaceItem }): ReactElement {
   return <span className={`marketplace-status is-${item.status}`}>{marketplaceStatusLabel(item.status)}</span>;
 }
@@ -299,6 +333,7 @@ function MinecraftAgentMarketplaceConfig({
   const [starterProcessState, setStarterProcessState] = useState<MinecraftAgentStarterProcessState>(DEFAULT_STARTER_PROCESS_STATE);
   const [lanPortText, setLanPortText] = useState('');
   const [statusLoading, setStatusLoading] = useState(false);
+  const [joinVerifyLoading, setJoinVerifyLoading] = useState(false);
   const [launchMessage, setLaunchMessage] = useState('');
 
   const applyStarterInfo = useCallback((info: MinecraftAgentStarterInfo): void => {
@@ -487,6 +522,38 @@ function MinecraftAgentMarketplaceConfig({
     setLaunchMessage(`已识别并保存 Minecraft LAN 端口：${port}`);
   };
 
+  const verifyMinecraftJoin = async (): Promise<void> => {
+    setJoinVerifyLoading(true);
+    setStatusLoading(true);
+    try {
+      const nextStatus = await window.lover.getMinecraftAgentStatus();
+      setAgentStatus(nextStatus);
+
+      let inventoryResponse: MinecraftAgentInventoryResponse | null = null;
+      if (nextStatus.connected) {
+        inventoryResponse = await window.lover.queryMinecraftAgentInventory(1800);
+      }
+
+      const latestStatus = await window.lover.getMinecraftAgentStatus().catch(() => nextStatus);
+      setAgentStatus(latestStatus);
+
+      const detail = minecraftJoinDetail(latestStatus.joinState, latestStatus, starterConfigForm);
+      const inventoryLine = nextStatus.connected ? `Live 背包：${minecraftInventoryBrief(inventoryResponse)}。` : 'Live 背包：未查询。';
+      const prefix =
+        latestStatus.joinState.phase === 'joined'
+          ? '联机验证通过'
+          : latestStatus.connected
+            ? '联机验证未完成'
+            : '联机验证未连接';
+      setLaunchMessage(`${prefix}：${detail}。${inventoryLine}${minecraftJoinAdvice(latestStatus.joinState, latestStatus)}`);
+    } catch (error) {
+      setLaunchMessage(error instanceof Error ? error.message : 'Minecraft 联机验证失败。');
+    } finally {
+      setJoinVerifyLoading(false);
+      setStatusLoading(false);
+    }
+  };
+
   const openAdminPanel = (): void => {
     openExternalUrl(adminUrl);
   };
@@ -649,10 +716,16 @@ function MinecraftAgentMarketplaceConfig({
             <span className={`minecraft-agent-status-badge is-${statusTone}`}>{statusLabel}</span>
             <span className={`minecraft-agent-status-badge is-${joinTone}`}>{joinLabel}</span>
           </div>
-          <button className="minecraft-agent-icon-button" type="button" disabled={statusLoading} onClick={() => void refreshStatus()}>
-            <RefreshCw className={statusLoading ? 'is-spinning' : ''} size={15} />
-            刷新
-          </button>
+          <div className="minecraft-agent-status-controls">
+            <button className="minecraft-agent-icon-button" type="button" disabled={statusLoading} onClick={() => void refreshStatus()}>
+              <RefreshCw className={statusLoading ? 'is-spinning' : ''} size={15} />
+              刷新
+            </button>
+            <button className="minecraft-agent-button" type="button" disabled={joinVerifyLoading || statusLoading} onClick={() => void verifyMinecraftJoin()}>
+              <CheckCircle2 size={15} />
+              验证联机
+            </button>
+          </div>
         </div>
         <div className="minecraft-agent-status-grid">
           <span>WS</span>
