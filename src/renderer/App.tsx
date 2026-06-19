@@ -267,6 +267,9 @@ function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): strin
     case 'error':
       return result.text ? `这一步没做成：${result.text}` : '这一步没做成，我先停下等你。';
     case 'interrupted':
+      if (/connection bounced|task lost|连接重建|动作已丢失/i.test(`${result.error ?? ''}\n${result.summary ?? ''}`)) {
+        return '我刚才那步中途断了一下，动作丢了，我先停住等你重新给目标。';
+      }
       return null;
     case 'busy':
     case 'dispatched':

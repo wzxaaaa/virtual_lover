@@ -193,8 +193,9 @@
 - `P17` 已补第八段受阻/危险语义：照抄 `github_girl` `_format_completion_cue` 的 blocked marker 思路，将 mc-agent `status=ok` 但反馈包含 `not found`、`unavailable`、`please provide`、`no path`、`blocked` 等文本的完成包改判为 `blocked`，前端不再说“做完了”，而是提示目标/路径/坐标可能需要换思路。`alert` 帧也从普通日志升级为高优先级 Minecraft 事件，携带 severity/cause，renderer 会立即播报危险并触发一轮带 bot 视角的补判断。适配点：当前项目没有 `github_girl` push_message priority/coalesce 队列，所以用现有消息队列和 `requestGameCompanionNudge(cue)` 承接。
 - `P17` 已补第九段截图预算：按 `github_girl` `service.py` / `plugin.toml` 的 `screenshot_max_edge_px=1024`、`screenshot_jpeg_quality=80`、`screenshot_max_bytes=102400` 思路，主进程收到 mc-agent 截图后会用 Electron `nativeImage` 压成 JPEG，按 1024/512/256 最长边和 80/65/50/40/30 质量阶梯尝试，尽量把单帧控制在 100KB 内再进入 bot 视角缓存和 LLM 多模态上下文；失败时保留原图，不丢掉视觉信息。适配点：`github_girl` 用 Pillow，本项目用 Electron 原生图像能力，避免新增依赖。
 - `P17` 已补第十段自主 nudge loop：按 `github_girl` `GameAgentService._system_prompt_loop` 的 8s in-progress、8s 后 keep-going、10s keep-going 冷却思路，在本项目 `minecraftAgent` 主进程服务里新增系统循环。任务执行超过 8s 会发 `[你正在做事]` cue，要求模型只在有新画面/反馈时讲一句、不要编结果、不要派新任务；任务结束并空闲 8s 后会发 `[你闲下来了]` cue，让模型基于 bot 视角和背包决定是否聊一句或派下一步。适配点：当前项目没有 `push_message ai_behavior="read"` 的 message-plane，所以没有照搬 general read-only 状态注入，避免每 5s 把被动状态变成强制发言；in-progress/keep-going 通过 `minecraft:agentEvent` 的 `nudge` 事件进入已有 `requestGameCompanionNudge(cue)` 多模态链路。
+- `P17` 已补第十一段任务防抖和连接抖动恢复：照抄 `github_girl` `GameAgentService._OVERWRITE_MIN_SURVIVAL_S = 2.0` 的 anti-thrash floor，`overwrite=true` 也不能打断刚下发 2 秒内的新任务，防止模型连续工具调用把 mc-agent 在多个目标之间来回打断；同步更新工具 schema 和 LLM 规则，要求只在用户明确纠正/停止/改目标或观察到卡住时 overwrite。另按 `github_girl` `_on_log("Connection lost and re-established.")` 的语义，WebSocket 非预期断开时立即把当前 pending task 标记为 interrupted/丢失，并释放 busy 状态、唤醒前端，而不是等 120s 超时。适配点：本项目没有 agent 日志层的固定重连文本，所以挂在 Electron WebSocket `onclose` 上承接同等语义。
 
-当前进度估算：整体迁移约 62%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 98%，完整游戏 Agent 自主玩法约 67%。
+当前进度估算：整体迁移约 62%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 69%。
 
 ## 文件域审阅摘要
 

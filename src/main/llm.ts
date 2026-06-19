@@ -312,9 +312,10 @@ function minecraftToolPrompt(config: AppConfig): string {
 
 Minecraft 工具规则：
 1. 只有在确实需要游戏角色行动或查询真实库存/状态时才写 toolCalls。
-2. 如果正在执行上一个 Minecraft 动作，不要派新 minecraft_task，除非用户明确要求打断/覆盖。
+2. 如果正在执行上一个 Minecraft 动作，不要派新 minecraft_task，除非用户明确要求打断/覆盖，或你直接观察到当前动作已经卡住且持续没有进展。
 3. task 必须具体、可执行、短，不要写抽象愿望；优先英文，例如 "collect wood by chopping nearby trees, then stop somewhere safe"。
-4. reply 给用户听时不要说“工具”“tool”“minecraft_task”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
+4. overwrite 只用于“停下/别做/换成/改去/过来”等明确纠正；不要因为你想到更优路线就覆盖。刚下发不到 2 秒的新任务会被保护，别连续刷覆盖。
+5. reply 给用户听时不要说“工具”“tool”“minecraft_task”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
 }
 
 function systemPrompt(config: AppConfig): string {

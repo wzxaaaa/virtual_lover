@@ -180,7 +180,11 @@ registerAgentTool(
     inputSchema: schema(
       {
         task: { type: 'string', description: 'One concrete executable Minecraft goal in English.' },
-        overwrite: { type: 'boolean', description: 'Interrupt the currently running task and start this one.' }
+        overwrite: {
+          type: 'boolean',
+          description:
+            'Interrupt the current task only for explicit user corrections, stop/change requests, or clearly observed stuck behavior. Fresh tasks younger than 2 seconds are protected from overwrite.'
+        }
       },
       ['task']
     ),

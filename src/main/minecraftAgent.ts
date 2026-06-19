@@ -40,6 +40,7 @@ const IN_PROGRESS_NUDGE_AFTER_MS = 8000;
 const IN_PROGRESS_NUDGE_COOLDOWN_MS = 8000;
 const KEEP_GOING_NUDGE_AFTER_MS = 8000;
 const KEEP_GOING_NUDGE_COOLDOWN_MS = 10000;
+const OVERWRITE_MIN_SURVIVAL_MS = 2000;
 const BLOCKED_TASK_FEEDBACK_MARKERS = [
   'obstacle',
   'obstructed',
@@ -424,13 +425,10 @@ class MinecraftAgentService {
     }
 
     if (this.pendingTask && request.overwrite === true) {
-      this.resolvePending({
-        ok: false,
-        status: 'interrupted',
-        query: this.pendingTask.taskText,
-        taskId: this.pendingTask.taskId,
-        summary: `Minecraft 动作已被新任务打断：${this.pendingTask.taskText}`
-      });
+      const rejected = this.interruptPendingForOverwrite(taskText);
+      if (rejected) {
+        return rejected;
+      }
     }
 
     const taskId = randomUUID();
@@ -491,13 +489,10 @@ class MinecraftAgentService {
     }
 
     if (this.pendingTask && request.overwrite === true) {
-      this.resolvePending({
-        ok: false,
-        status: 'interrupted',
-        query: this.pendingTask.taskText,
-        taskId: this.pendingTask.taskId,
-        summary: `Minecraft 动作已被新任务打断：${this.pendingTask.taskText}`
-      });
+      const rejected = this.interruptPendingForOverwrite(taskText);
+      if (rejected) {
+        return rejected;
+      }
     }
 
     const taskId = randomUUID();
@@ -570,6 +565,44 @@ class MinecraftAgentService {
     };
   }
 
+  private interruptPendingForOverwrite(nextTaskText: string): MinecraftAgentTaskResult | null {
+    const pending = this.pendingTask;
+    if (!pending) {
+      return null;
+    }
+
+    const ageMs = Date.now() - pending.startedAt;
+    if (ageMs < OVERWRITE_MIN_SURVIVAL_MS) {
+      return this.busyResult();
+    }
+
+    this.resolvePending({
+      ok: false,
+      status: 'interrupted',
+      query: pending.taskText,
+      taskId: pending.taskId,
+      summary: `Minecraft 动作已被新任务打断：${pending.taskText}`,
+      error: `Interrupted by new task: ${nextTaskText}`
+    });
+    return null;
+  }
+
+  private interruptPendingForConnectionBounce(): void {
+    const pending = this.pendingTask;
+    if (!pending) {
+      return;
+    }
+
+    this.resolvePending({
+      ok: false,
+      status: 'interrupted',
+      query: pending.taskText,
+      taskId: pending.taskId,
+      summary: `Minecraft Agent 连接重建，当前动作已丢失：${pending.taskText}`,
+      error: 'Agent connection bounced; task lost.'
+    });
+  }
+
   private createTaskTimeout(taskText: string, taskId: string, timeoutMs: number): ReturnType<typeof setTimeout> {
     return setTimeout(() => {
       if (this.pendingTask?.taskId === taskId) {
@@ -637,6 +670,9 @@ class MinecraftAgentService {
         }
         this.socket = null;
         this.connected = false;
+        this.lastError = 'Minecraft Agent connection lost; reconnecting.';
+        this.interruptPendingForConnectionBounce();
+        this.resolveInventoryWaiters('none', this.lastError);
         this.emitStatus();
         this.scheduleReconnect();
       };
