@@ -384,6 +384,27 @@ export interface MinecraftAgentDangerState {
   lowHealth?: boolean;
 }
 
+export interface MinecraftAgentContainerState {
+  updatedAt: number;
+  kind?: string;
+  name?: string;
+  status?: string;
+  distance?: number;
+  position?: MinecraftAgentPosition;
+  items?: Record<string, number>;
+}
+
+export interface MinecraftAgentBlockInteractionState {
+  updatedAt: number;
+  action?: string;
+  status?: string;
+  block?: string;
+  item?: string;
+  position?: MinecraftAgentPosition;
+  progress?: number;
+  remainingMs?: number;
+}
+
 export interface MinecraftAgentWorldState {
   updatedAt: number;
   health?: number;
@@ -403,6 +424,8 @@ export interface MinecraftAgentWorldState {
   nearbyPlayers?: MinecraftAgentPlayerState[];
   path?: MinecraftAgentPathState;
   danger?: MinecraftAgentDangerState;
+  sharedContainers?: MinecraftAgentContainerState[];
+  blockInteraction?: MinecraftAgentBlockInteractionState;
 }
 
 export interface MinecraftAgentStatus {

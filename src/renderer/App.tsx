@@ -53,6 +53,8 @@ import {
   Live2DTouchSetEntryConfig,
   MemoryState,
   MinecraftAgentAlert,
+  MinecraftAgentBlockInteractionState,
+  MinecraftAgentContainerState,
   MinecraftAgentDangerState,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
@@ -208,18 +210,33 @@ function isMinecraftAgentTaskResult(value: unknown): value is MinecraftAgentTask
   return value !== null && typeof value === 'object' && 'status' in value && 'query' in value && 'summary' in value;
 }
 
+function formatMinecraftPositionReply(position?: MinecraftAgentPlayerState['position'] | null): string {
+  if (!position) {
+    return '';
+  }
+
+  const coords = `${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}`;
+  const facing = [
+    position.yaw !== undefined ? `yaw ${position.yaw.toFixed(0)}°` : '',
+    position.pitch !== undefined ? `pitch ${position.pitch.toFixed(0)}°` : ''
+  ].filter(Boolean);
+  return facing.length > 0 ? `${coords}（${facing.join('/')}）` : coords;
+}
+
 function formatMinecraftPlayerStateReply(player: MinecraftAgentPlayerState): string {
   const name = player.name || '玩家';
   const distance = player.distance !== undefined ? `距离 ${player.distance.toFixed(1)} 格` : '';
-  const position = player.position ? `位置 ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}` : '';
+  const position = player.position ? `位置 ${formatMinecraftPositionReply(player.position)}` : '';
+  const dimension = player.dimension ? `维度 ${player.dimension}` : '';
+  const health = player.health !== undefined ? `血量 ${player.health}` : '';
   const held = player.selectedItem ? `手持 ${player.selectedItem}` : '';
-  return [name, distance, position, held].filter(Boolean).join('；');
+  return [name, distance, position, dimension, health, held].filter(Boolean).join('；');
 }
 
 function formatMinecraftTargetStateReply(target: MinecraftAgentTargetState): string {
   const name = target.name || target.block || target.item || target.kind || '目标';
   const distance = target.distance !== undefined ? `距离 ${target.distance.toFixed(1)} 格` : '';
-  const position = target.position ? `位置 ${target.position.x.toFixed(1)}, ${target.position.y.toFixed(1)}, ${target.position.z.toFixed(1)}` : '';
+  const position = target.position ? `位置 ${formatMinecraftPositionReply(target.position)}` : '';
   return [name, distance, position].filter(Boolean).join('；');
 }
 
@@ -247,13 +264,57 @@ function formatMinecraftDangerStateReply(danger?: MinecraftAgentDangerState): st
   return [level, causes, hostiles].filter(Boolean).join('；');
 }
 
+function formatMinecraftContainerStateReply(container: MinecraftAgentContainerState): string {
+  const name = container.name || container.kind || '容器';
+  const status = container.status ? `状态 ${container.status}` : '';
+  const distance = container.distance !== undefined ? `距离 ${container.distance.toFixed(1)} 格` : '';
+  const position = container.position ? `位置 ${formatMinecraftPositionReply(container.position)}` : '';
+  const items = container.items
+    ? Object.entries(container.items)
+        .filter(([, count]) => count > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 4)
+        .map(([item, count]) => `${item}×${count}`)
+        .join('、')
+    : '';
+  return [name, status, distance, position, items ? `物品 ${items}` : ''].filter(Boolean).join('；');
+}
+
+function formatMinecraftBlockInteractionStateReply(blockInteraction?: MinecraftAgentBlockInteractionState): string {
+  if (!blockInteraction) {
+    return '';
+  }
+
+  const target = blockInteraction.block || blockInteraction.item || '方块';
+  const action = blockInteraction.action ? `动作 ${blockInteraction.action}` : '';
+  const status = blockInteraction.status ? `状态 ${blockInteraction.status}` : '';
+  const position = blockInteraction.position ? `位置 ${formatMinecraftPositionReply(blockInteraction.position)}` : '';
+  const progress = blockInteraction.progress !== undefined ? `进度 ${blockInteraction.progress}` : '';
+  return [target, action, status, position, progress].filter(Boolean).join('；');
+}
+
+function formatMinecraftCollaborationReply(status: MinecraftAgentStatus): string {
+  const state = status.worldState;
+  if (!state) {
+    return '';
+  }
+
+  const tracked = state.trackedPlayer
+    ? `协作：我会围着 ${state.trackedPlayer.name || '你'} 保持 3-5 格，不挡你的路${state.trackedPlayer.distance !== undefined && state.trackedPlayer.distance > 8 ? '；现在距离偏远，会先找回或等你' : ''}`
+    : '协作：还没有稳定识别到你的游戏坐标；如果要跟随，我会先尝试找回你。';
+  const containers = state.sharedContainers?.length ? `共享容器：${state.sharedContainers.slice(0, 2).map(formatMinecraftContainerStateReply).join('、')}` : '';
+  const blockInteraction = formatMinecraftBlockInteractionStateReply(state.blockInteraction);
+
+  return [tracked, containers, blockInteraction ? `当前交互：${blockInteraction}` : ''].filter(Boolean).join('\n');
+}
+
 function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
   const state = status.worldState;
   if (!state) {
     return '';
   }
 
-  const position = state.position ? `位置 ${state.position.x.toFixed(1)}, ${state.position.y.toFixed(1)}, ${state.position.z.toFixed(1)}` : '';
+  const position = state.position ? `位置 ${formatMinecraftPositionReply(state.position)}` : '';
   const health = state.health !== undefined ? `血量 ${state.health}${state.maxHealth !== undefined ? `/${state.maxHealth}` : ''}` : '';
   const food = state.food !== undefined ? `饥饿 ${state.food}` : '';
   const held = state.selectedItem ? `手持 ${state.selectedItem}` : '';
@@ -264,7 +325,8 @@ function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
     : '';
   const path = formatMinecraftPathStateReply(state.path);
   const danger = formatMinecraftDangerStateReply(state.danger);
-  const parts = [position, health, food, held, trackedPlayer, nearbyPlayers, path, danger, nearby].filter(Boolean);
+  const blockInteraction = formatMinecraftBlockInteractionStateReply(state.blockInteraction);
+  const parts = [position, health, food, held, trackedPlayer, nearbyPlayers, path, danger, blockInteraction ? `当前交互 ${blockInteraction}` : '', nearby].filter(Boolean);
 
   return parts.length > 0 ? `我这边：${parts.join('；')}` : '';
 }
@@ -310,8 +372,9 @@ function formatMinecraftStatusReply(result: AgentToolResult): string {
   const planLine = formatMinecraftPlanStateReply(status);
   const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
   const worldLine = formatMinecraftWorldStateReply(status);
+  const collaborationLine = formatMinecraftCollaborationReply(status);
   const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
-  return [goalLine, taskLine, planLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
+  return [goalLine, taskLine, planLine, logLine, worldLine, collaborationLine, bagLine].filter(Boolean).join('\n');
 }
 
 function formatMinecraftTaskReply(result: AgentToolResult): string {
@@ -4071,11 +4134,15 @@ export function App(): ReactElement {
   }
 
   function minecraftStatusToObservation(status: MinecraftAgentStatus | null): ScreenObservation {
+    const worldLine = status ? formatMinecraftWorldStateReply(status) : '';
+    const collaborationLine = status ? formatMinecraftCollaborationReply(status) : '';
+    const statusSummary = [status?.lastLog ? `最近反馈：${status.lastLog}` : '', worldLine, collaborationLine].filter(Boolean).join('；');
+
     return {
       capturedAt: status?.lastScreenshot?.capturedAt ?? Date.now(),
       sourceName: 'Minecraft Agent',
-      summary: status?.lastLog
-        ? `mc-agent 最近反馈：${status.lastLog}`
+      summary: statusSummary
+        ? `mc-agent：${statusSummary}`
         : status?.connected
           ? '没有用户屏幕摘要，本轮只参考她在 Minecraft 里的身体状态。'
           : 'mc-agent 未连接，还没有她在 Minecraft 里的身体画面。',

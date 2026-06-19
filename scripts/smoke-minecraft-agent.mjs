@@ -393,16 +393,32 @@ function mockRichStatusFrame(scenario) {
     trackedPlayer: {
       name: 'player',
       distance: 6.2,
-      position: { x: 116, y: 64, z: -33 },
+      position: { x: 116, y: 64, z: -33, yaw: 270, pitch: 2 },
       selectedItem: 'torch'
     },
     nearbyPlayers: [
       {
         name: 'player',
         distance: 6.2,
-        position: { x: 116, y: 64, z: -33 }
+        position: { x: 116, y: 64, z: -33, yaw: 270, pitch: 2 }
       }
     ],
+    sharedContainers: [
+      {
+        type: 'chest',
+        name: 'base chest',
+        distance: 4.4,
+        position: { x: 118, y: 64, z: -34 },
+        items: { oak_log: 12, torch: 16, bread: 3 }
+      }
+    ],
+    blockInteraction: {
+      action: 'mine',
+      status: 'in_progress',
+      block: 'oak_log',
+      position: { x: 138, y: 64, z: -31 },
+      progress: 0.42
+    },
     path: {
       status: 'moving',
       distance: 18.5,
@@ -799,9 +815,15 @@ async function main() {
   }
 
   if (options.mock && options.scenario === 'rich-state') {
-    const hasRichStatus = latestAgentStatus && latestAgentStatus.path && latestAgentStatus.danger && latestAgentStatus.trackedPlayer;
+    const hasRichStatus =
+      latestAgentStatus &&
+      latestAgentStatus.path &&
+      latestAgentStatus.danger &&
+      latestAgentStatus.trackedPlayer &&
+      latestAgentStatus.sharedContainers &&
+      latestAgentStatus.blockInteraction;
     if (!hasRichStatus) {
-      console.error('[mc-smoke] rich-state scenario did not receive path/danger/trackedPlayer status');
+      console.error('[mc-smoke] rich-state scenario did not receive path/danger/trackedPlayer/sharedContainers/blockInteraction status');
       return 4;
     }
     if (!latestChat) {

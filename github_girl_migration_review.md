@@ -204,8 +204,9 @@
 - `P17` 已补第十九段游戏内聊天桥：按 `github_girl` game agent “游戏内身体/外部 agent 负责实际交互，本应用负责对话和任务调度”的方向，主进程 `minecraftAgent` 新增最近游戏聊天缓存和 `plugin.minecraft_chat` 工具；入站兼容 `chat/game_chat/player_chat/message`，出站发送 `{ type: "chat", text, message }` 给外部 mc-agent。LLM 的 Minecraft bot 视角会带入最近聊天，前端文本直达支持“在游戏里说/回复/打字…”，收到游戏聊天事件会触发陪玩 nudge，让她能自然判断是否在 MC 里回一句。适配点：`github_girl` 已公开的 Minecraft 插件说明里没有稳定聊天帧 schema，本项目先做兼容层；真正把消息发进 MC 聊天还需要外部 mc-agent 实现/确认该帧。
 - `P17` 已补第二十段目标阶段/检查点状态：继续按 `github_girl` `GameAgentService` 把 pending、dispatched history、task_finished、keep-going nudge 分开的思路，本项目新增 `MinecraftAgentPlanState`，在任务帧真正发出后记录 active step，收到完成/受阻/超时/打断/迟到完成后回写最近步骤、摘要、连续失败次数和最后结果时间。`planState` 进入 `MinecraftAgentStatus`、LLM 的 Minecraft bot 视角、状态工具、前端状态回复和 keep-going nudge；当连续受阻时，prompt 会要求换具体坐标/目标或先问用户，不再重复派同一个动作。适配点：这还不是外部 mc-agent 里的真正规划器，而是当前应用内的目标阶段缓存；完整 plan/checkpoint/失败恢复仍需要后续结合 message-plane 和外部身体状态实现。
 - `P17` 已补第二十一段协议回放测试扩展：继续按 `github_girl` `smoke_local.py` / `smoke_overwrite.py` 的思路，把本项目 `scripts/smoke-minecraft-agent.mjs` 从普通 task/query_inventory/stale-task-id 扩到 `rich-state`、`blocked-task`、`chat` 三个 mock 场景。`rich-state` 会回放血量、坐标、维度、生物群系、装备、附近实体、队友位置、路径、危险、聊天和告警；`blocked-task` 会模拟 `status=ok` 但文本含 `could not/no path` 的 blocked marker；`chat` 会验证出站聊天帧和入站聊天回显。新增 `npm run smoke:minecraft-agent:mock:rich|blocked|chat`，用于后续改 Agent 架构时快速锁住协议行为。适配点：这仍是 Node WebSocket 协议级 smoke，不是 Electron 主进程内部服务测试；服务级测试还要等测试入口或 message-plane 拆出来后补。
+- `P17` 已补第二十二段多人协作语义：在不破坏 `github_girl` 已迁的 `minecraft_task`/busy/overwrite/nudge 规则前提下，新增“跟随 3-5 格、不挡视线/路径、距离超过 8 格先等待或找回、危险优先保护、分工不抢资源、共享箱子只处理富余物品”等协作约束。文本直达现在能识别“别挡路/保护我/等我/带路/分工/共享箱子”等指令并转成更具体的英文 task；LLM Minecraft 视角、游戏同伴 prompt、状态工具回复和市场能力都同步显示协作状态。主进程状态解析新增 `sharedContainers` 和 `blockInteraction` 兼容字段，rich-state smoke 也回放并断言共享容器/方块交互进度。适配点：`github_girl` 公开 Minecraft 插件本身没有更细的协作 schema，本轮属于在其 game-agent 桥接逻辑之上的本项目适配增强；真正“不挡路/共享箱子/分工”的物理执行还依赖外部 mc-agent 按 task 落地。
 
-当前进度估算：整体迁移约 66%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 85%。
+当前进度估算：整体迁移约 66%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 86%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -224,17 +225,17 @@
 
 1. **mc-agent 外部身体仍需用户下载运行**：当前应用负责对话、视觉、任务下发；真正进 Minecraft 控制第二账号的是外部 mc-agent。还没有把 mineflayer/mc-agent 源码、二进制、版本管理和自动启动完整打包进本项目。
 2. **message-plane 未补导致 general read-only 状态注入没原样迁**：`github_girl` 能把日志/截图作为 `read` 上下文静默塞给模型；本项目目前只迁了任务完成、危险、执行中、空闲续玩这些会触发判断的 cue。要原样迁，需要先补 message-plane。
-3. **更丰富的游戏状态**：已能接住并入模血量、饥饿、坐标、维度、生物群系、装备、手持物、附近实体、用户/队友位置、附近玩家、方块/目标、路径状态、危险等级、最近游戏聊天等常见状态；还缺用户朝向、共享容器状态、方块交互进度等更细的协作 ground truth，需等 mc-agent 协议明确输出。
+3. **更丰富的游戏状态**：已能接住并入模血量、饥饿、坐标、朝向、维度、生物群系、装备、手持物、附近实体、用户/队友位置、附近玩家、方块/目标、路径状态、危险等级、共享容器、方块交互进度、最近游戏聊天等常见状态；还缺更稳定的用户身份映射、用户视线方向语义、容器锁/物品预定等协作 ground truth，需等 mc-agent 协议明确输出。
 4. **长期目标规划**：已有 `activeGoal` 和 `planState` 保存这一局持续目标、当前步骤、最近步骤、连续受阻次数，并进入空闲续玩判断；状态层也能接住路径/目标/危险反馈。还缺真正的多阶段 plan 生成、checkpoint 持久化、失败恢复策略和资源预算。
-5. **多玩家协作语义**：已能缓存用户/队友距离、位置和附近玩家；还缺跟随半径、别挡路、分工采集、共享箱子、用户朝向等明确协作规则。
+5. **多玩家协作语义**：已补跟随半径、别挡路、保护、带路、等待、分工采集、共享箱子等任务/prompt/status 规则；还缺外部 mc-agent 真实物理层的“不挡路”寻路策略、共享容器锁/物品预定、稳定用户身份映射和基于用户视线方向的协作细节。
 6. **游戏内自然沟通**：已补基础聊天桥，能缓存游戏聊天并通过 `plugin.minecraft_chat` 向外部 mc-agent 发送短句；还缺外部 mc-agent 对聊天帧的稳定协议确认、游戏内用户身份映射，以及把游戏内聊天和桌面对话做更完整的去重/合并。
 7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。
 8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；还缺 Electron 主进程服务级 smoke，自动覆盖断线、busy、overwrite 防抖、UI 事件回流。
 
 ### 下一步建议顺序
 
-1. 先补 **Minecraft E2E 模拟器/测试**，把目前 99% 的项目内闭环锁住，防止后面改 Agent 大架构时打爆。
-2. 再补 **mc-agent richer status 协议适配**，如果外部 agent 能吐血量/坐标/维度/装备，就把这些入模。
+1. 先补 **Electron 主进程服务级 Minecraft smoke**，覆盖断线、busy、overwrite 防抖、UI 事件回流，把目前 99% 的项目内闭环锁住。
+2. 再补 **mc-agent 协作协议确认**，和外部 agent 对齐 tracked player 身份、共享容器、方块交互、不挡路/跟随半径这些字段与动作语义。
 3. 然后做 **全局 message-plane**，让 Minecraft 和其他 Agent 能共享 `read/respond`、priority、coalesce。
 4. 最后再拆 **独立 Agent 服务 + 任务系统**，这是大工程，应该在 Minecraft 核心稳定后动。
 

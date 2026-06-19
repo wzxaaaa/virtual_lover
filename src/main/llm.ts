@@ -265,21 +265,35 @@ function formatMinecraftInventory(inventory: Record<string, number>): string {
   return items.length > 0 ? items.join('、') : '空';
 }
 
+function formatMinecraftPosition(position?: MinecraftAgentPlayerState['position'] | null): string {
+  if (!position) {
+    return '';
+  }
+
+  const coords = `${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}`;
+  const facing = [
+    position.yaw !== undefined ? `yaw ${position.yaw.toFixed(0)}°` : '',
+    position.pitch !== undefined ? `pitch ${position.pitch.toFixed(0)}°` : ''
+  ].filter(Boolean);
+  return facing.length > 0 ? `${coords} (${facing.join('/')})` : coords;
+}
+
 function formatMinecraftPlayerState(player: MinecraftAgentPlayerState): string {
   const name = player.name || '玩家';
   const distance = player.distance !== undefined ? `距离 ${player.distance.toFixed(1)} 格` : '';
-  const position = player.position ? `位置 ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}` : '';
+  const position = player.position ? `位置 ${formatMinecraftPosition(player.position)}` : '';
   const health = player.health !== undefined ? `血量 ${player.health}` : '';
+  const dimension = player.dimension ? `维度 ${player.dimension}` : '';
   const held = player.selectedItem ? `手持 ${player.selectedItem}` : '';
 
-  return [name, distance, position, health, held].filter(Boolean).join('；');
+  return [name, distance, position, dimension, health, held].filter(Boolean).join('；');
 }
 
 function formatMinecraftTargetState(target: MinecraftAgentTargetState): string {
   const name = target.name || target.block || target.item || target.kind || '目标';
   const status = target.status ? `状态 ${target.status}` : '';
   const distance = target.distance !== undefined ? `距离 ${target.distance.toFixed(1)} 格` : '';
-  const position = target.position ? `位置 ${target.position.x.toFixed(1)}, ${target.position.y.toFixed(1)}, ${target.position.z.toFixed(1)}` : '';
+  const position = target.position ? `位置 ${formatMinecraftPosition(target.position)}` : '';
 
   return [name, status, distance, position].filter(Boolean).join('；');
 }
@@ -312,13 +326,66 @@ function formatMinecraftDangerState(danger?: MinecraftAgentDangerState): string 
   return [level, causes, hostiles].filter(Boolean).join('；');
 }
 
+function formatMinecraftContainerState(container: NonNullable<MinecraftAgentWorldState['sharedContainers']>[number]): string {
+  const name = container.name || container.kind || '容器';
+  const status = container.status ? `状态 ${container.status}` : '';
+  const distance = container.distance !== undefined ? `距离 ${container.distance.toFixed(1)} 格` : '';
+  const position = container.position ? `位置 ${formatMinecraftPosition(container.position)}` : '';
+  const items = container.items ? formatMinecraftInventory(container.items) : '';
+
+  return [name, status, distance, position, items && items !== '空' ? `物品 ${items}` : ''].filter(Boolean).join('；');
+}
+
+function formatMinecraftBlockInteractionState(blockInteraction?: MinecraftAgentWorldState['blockInteraction']): string {
+  if (!blockInteraction) {
+    return '';
+  }
+
+  const target = blockInteraction.block || blockInteraction.item || '方块';
+  const action = blockInteraction.action ? `动作 ${blockInteraction.action}` : '';
+  const status = blockInteraction.status ? `状态 ${blockInteraction.status}` : '';
+  const position = blockInteraction.position ? `位置 ${formatMinecraftPosition(blockInteraction.position)}` : '';
+  const progress = blockInteraction.progress !== undefined ? `进度 ${blockInteraction.progress}` : '';
+  const remaining = blockInteraction.remainingMs !== undefined ? `剩余约 ${Math.round(blockInteraction.remainingMs / 1000)} 秒` : '';
+
+  return [target, action, status, position, progress, remaining].filter(Boolean).join('；');
+}
+
+function formatMinecraftCollaborationState(worldState?: MinecraftAgentWorldState | null): string {
+  if (!worldState) {
+    return '协作状态：暂无用户/队友 ground truth；不要假装知道用户坐标。';
+  }
+
+  const player = worldState.trackedPlayer;
+  const playerLine = player
+    ? `协作对象 ${formatMinecraftPlayerState(player)}${player.distance !== undefined && player.distance > 8 ? '；距离超过 8 格，下一步优先等待/找回/靠近到 3-5 格' : ''}`
+    : '协作对象 暂无明确 trackedPlayer；如果用户要求跟随，任务里要说明先找到玩家。';
+  const nearbyPlayers = worldState.nearbyPlayers?.length
+    ? `附近玩家 ${worldState.nearbyPlayers.slice(0, 5).map(formatMinecraftPlayerState).join('；')}`
+    : '';
+  const containers = worldState.sharedContainers?.length
+    ? `共享容器 ${worldState.sharedContainers.slice(0, 4).map(formatMinecraftContainerState).join('；')}`
+    : '';
+  const blockInteraction = formatMinecraftBlockInteractionState(worldState.blockInteraction);
+
+  return [
+    `协作状态：${playerLine}`,
+    nearbyPlayers,
+    containers,
+    blockInteraction ? `当前方块交互 ${blockInteraction}` : '',
+    '协作硬规则：跟随/保护保持 3-5 格，超过 8 格先等待或找回；不要站在用户正前方、不要堵路、不要挖用户脚下方块；分工时做平行任务，不抢用户正在用的资源；共享箱子只存取明确富余物品并保留生存工具/食物。'
+  ]
+    .filter(Boolean)
+    .join('；');
+}
+
 function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null): string {
   if (!worldState) {
     return '身体状态：暂无真实数据。';
   }
 
   const position = worldState.position
-    ? `坐标 ${worldState.position.x.toFixed(1)}, ${worldState.position.y.toFixed(1)}, ${worldState.position.z.toFixed(1)}`
+    ? `坐标 ${formatMinecraftPosition(worldState.position)}`
     : '';
   const health =
     worldState.health !== undefined ? `血量 ${worldState.health}${worldState.maxHealth !== undefined ? `/${worldState.maxHealth}` : ''}` : '';
@@ -338,7 +405,25 @@ function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null)
     : '';
   const path = formatMinecraftPathState(worldState.path);
   const danger = formatMinecraftDangerState(worldState.danger);
-  const parts = [position, health, food, place ? `地点 ${place}` : '', held, equipment, trackedPlayer, nearbyPlayers, path, danger, nearby].filter(Boolean);
+  const containers = worldState.sharedContainers?.length
+    ? `共享容器 ${worldState.sharedContainers.slice(0, 4).map(formatMinecraftContainerState).join('；')}`
+    : '';
+  const blockInteraction = formatMinecraftBlockInteractionState(worldState.blockInteraction);
+  const parts = [
+    position,
+    health,
+    food,
+    place ? `地点 ${place}` : '',
+    held,
+    equipment,
+    trackedPlayer,
+    nearbyPlayers,
+    path,
+    danger,
+    containers,
+    blockInteraction ? `当前方块交互 ${blockInteraction}` : '',
+    nearby
+  ].filter(Boolean);
 
   return parts.length > 0 ? `身体状态：${parts.join('；')}。更新时间：${new Date(worldState.updatedAt).toLocaleString('zh-CN')}。` : '身体状态：暂无真实数据。';
 }
@@ -390,6 +475,7 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleString('zh-CN')}。`
       : '最近自主判断：暂无。',
     formatMinecraftWorldState(status.worldState),
+    formatMinecraftCollaborationState(status.worldState),
     status.lastInventoryAt > 0 ? `当前背包：${formatMinecraftInventory(status.lastInventory)}` : '当前背包：暂无真实数据',
     status.lastScreenshot
       ? includesImage
@@ -449,8 +535,11 @@ Minecraft 工具规则：
 4. goal 用来描述这一局持续追的目标，可以直接用用户原话或短中文总结；如果只是查状态/背包，不要写 goal。
 5. overwrite 只用于“停下/别做/换成/改去/过来”等明确纠正；不要因为你想到更优路线就覆盖。刚下发不到 2 秒的新任务会被保护，别连续刷覆盖。
 6. 如果“目标阶段”显示连续失败/受阻，不要重复派同一动作；换一个更具体的坐标/目标，或先用一句自然的话向用户确认。
-7. minecraft_chat 只在用户让你在游戏里说话/回复，或队友游戏聊天需要你短句回应时使用；不要每轮普通桌面对话都发游戏聊天。聊天内容保持很短，中文不超过 80 字，英文不超过 120 字。
-8. reply 给用户听时不要说“工具”“tool”“minecraft_task”“minecraft_chat”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
+7. 跟随/保护/带路/分工任务必须把协作约束写进 task：保持 3-5 格、不挡视线和路径、超过 8 格先等待或找回、危险时优先保护用户。
+8. 不要派“站到用户正前方”“挖用户脚下方块”“抢走用户正在使用资源”的任务。共享箱子/容器相关任务只处理明确富余物品，并保留生存必需的食物和工具。
+9. 如果 trackedPlayer/用户位置缺失，不要假装知道用户在哪；先派“locate/regroup with the player safely”这类找回任务，或自然问一句要不要报坐标。
+10. minecraft_chat 只在用户让你在游戏里说话/回复，或队友游戏聊天需要你短句回应时使用；不要每轮普通桌面对话都发游戏聊天。聊天内容保持很短，中文不超过 80 字，英文不超过 120 字。
+11. reply 给用户听时不要说“工具”“tool”“minecraft_task”“minecraft_chat”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
 }
 
 function systemPrompt(config: AppConfig): string {

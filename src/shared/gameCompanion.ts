@@ -43,16 +43,22 @@ const MINECRAFT_CHAT_RE =
   /(?:在|到)?(?:游戏|我的世界|minecraft|mc).*?(?:说|发|回复|喊|打字|chat)|(?:说|发|回复|喊|打字).*?(?:游戏|我的世界|minecraft|mc|聊天|chat)/i;
 const MINECRAFT_STOP_TASK_RE = /(?:停止|取消|中断|打断|停下|别做).*(?:任务|动作|操作|当前|挖|砍|找|走)|(?:先停|停一下|别动了|别动)/i;
 const MINECRAFT_TASK_SIGNAL_RE =
-  /帮我|替我|让(?:她|你|ai|AI|猫猫)?|叫(?:她|你)|去|开始|继续|执行|挖|采|砍|收集|探索|跑|跟着|攻击|打|回家|睡觉|吃|找|制作|合成|整理|走|往|躲|避开|杀|防御|等待|守住|种|钓|交易|装备|熔炼|烧|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come/i;
+  /帮我|替我|让(?:她|你|ai|AI|猫猫)?|叫(?:她|你)|去|开始|继续|执行|挖|采|砍|收集|探索|跑|跟着|跟随|攻击|打|回家|睡觉|吃|找|制作|合成|整理|走|往|躲|避开|杀|防御|保护|掩护|等待|等我|守住|别挡|让开|保持距离|分工|分头|箱子|共享|带路|种|钓|交易|装备|熔炼|烧|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come|guard|protect|cover|chest|storage|container|deposit/i;
 
 const MINECRAFT_TASK_PRESETS: Array<[RegExp, string]> = [
+  [/(别挡|挡路|让开|站旁边|离我远|保持距离|不要挡|别堵|keep distance|don't block|dont block|move aside|out of my way)/i, 'move to the side of the player, keep a respectful 4 block distance, and do not block the player view or path'],
+  [/(跟着我|跟随我|跟我|跟紧|过来跟|follow|come)/i, 'follow the player at a safe 3 to 5 block distance, stay out of the player line of sight, and stop or wait if the route is unsafe'],
+  [/(保护我|护着我|掩护我|看着我|守住我|帮我打怪|cover me|guard me|protect me)/i, 'guard the player from nearby hostile mobs while keeping 3 to 5 blocks of distance and avoiding friendly obstruction'],
+  [/(等我|等等我|别走|停这等|原地等|wait for me|hold on)/i, 'wait safely near the player without blocking their path, watch for danger, and resume only after the player catches up or gives a new instruction'],
+  [/(带路|领路|走前面|你带我|lead the way|lead me)/i, 'lead the player slowly toward the target, wait whenever the player is more than 8 blocks away, and avoid dangerous drops or lava'],
+  [/(一起|分工|分头|你挖|我挖|你采|我采|并排|parallel|split|coordinate|together)/i, 'coordinate with the player: take a nearby parallel task that does not block the player, report blockers, and avoid taking resources the player is actively using'],
+  [/(箱子|共享箱|共享|放箱子|存起来|整理箱子|chest|storage|container|deposit)/i, 'use the shared chest or storage only if visible and safe: deposit useful surplus items, keep food and tools needed for survival, then report the inventory change'],
   [/(砍树|伐木|木头|原木|wood|tree)/i, 'collect wood by chopping nearby trees, then stop somewhere safe'],
   [/(挖矿|采矿|下矿|矿洞|mine|mining)/i, 'mine safely and collect useful ores, avoiding lava and dangerous drops'],
   [/(钻石|diamond)/i, 'look for diamonds safely and keep the player informed if the route becomes dangerous'],
   [/(铁矿|找铁|iron)/i, 'look for iron ore safely, mine it if found, then return to a safe place'],
   [/(煤|coal)/i, 'collect coal safely and avoid dangerous drops or hostile mobs'],
   [/(回家|回基地|基地|home|base)/i, 'return to the player base or home safely'],
-  [/(跟着我|跟随我|跟我|follow|come)/i, 'follow the player closely and avoid getting stuck'],
   [/(探索|探路|explore)/i, 'explore the nearby area safely and remember useful landmarks'],
   [/(建|造|搭|房子|build|house)/i, 'build a simple safe shelter using available materials'],
   [/(怪|僵尸|骷髅|苦力怕|攻击|打怪|杀|fight|attack|mob)/i, 'fight nearby hostile mobs only when it is safe, then retreat if health is low'],
@@ -121,22 +127,48 @@ function normalizeMinecraftTask(text: string): string | null {
   return `follow this Minecraft player request: ${compactText.slice(0, 240)}`;
 }
 
+function formatMinecraftPosition(position?: MinecraftAgentPlayerState['position'] | null): string {
+  if (!position) {
+    return '';
+  }
+
+  const coords = `${position.x.toFixed(1)},${position.y.toFixed(1)},${position.z.toFixed(1)}`;
+  const facing = [
+    position.yaw !== undefined ? `yaw ${position.yaw.toFixed(0)}°` : '',
+    position.pitch !== undefined ? `pitch ${position.pitch.toFixed(0)}°` : ''
+  ].filter(Boolean);
+  return facing.length > 0 ? `${coords} ${facing.join('/')}` : coords;
+}
+
+function formatMinecraftItemCounts(items?: Record<string, number>, limit = 6): string {
+  if (!items) {
+    return '';
+  }
+
+  return Object.entries(items)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, limit)
+    .map(([name, count]) => `${name}×${count}`)
+    .join('、');
+}
+
 function formatMinecraftPlayerState(player: MinecraftAgentPlayerState): string {
   const name = player.name || '玩家';
   const distance = player.distance !== undefined ? `距离${player.distance.toFixed(1)}格` : '';
-  const position = player.position
-    ? `位置${player.position.x.toFixed(1)},${player.position.y.toFixed(1)},${player.position.z.toFixed(1)}`
-    : '';
+  const position = player.position ? `位置${formatMinecraftPosition(player.position)}` : '';
+  const dimension = player.dimension ? `维度${player.dimension}` : '';
+  const health = player.health !== undefined ? `血量${player.health}` : '';
   const held = player.selectedItem ? `手持${player.selectedItem}` : '';
 
-  return [name, distance, position, held].filter(Boolean).join(' ');
+  return [name, distance, position, dimension, health, held].filter(Boolean).join(' ');
 }
 
 function formatMinecraftTargetState(target: MinecraftAgentTargetState): string {
   const name = target.name || target.block || target.item || target.kind || '目标';
   const distance = target.distance !== undefined ? `距离${target.distance.toFixed(1)}格` : '';
   const status = target.status ? `状态${target.status}` : '';
-  const position = target.position ? `位置${target.position.x.toFixed(1)},${target.position.y.toFixed(1)},${target.position.z.toFixed(1)}` : '';
+  const position = target.position ? `位置${formatMinecraftPosition(target.position)}` : '';
 
   return [name, distance, status, position].filter(Boolean).join(' ');
 }
@@ -168,13 +200,59 @@ function formatMinecraftDangerState(danger?: MinecraftAgentDangerState): string 
   return [level, causes, hostiles].filter(Boolean).join('；');
 }
 
+function formatMinecraftContainerState(container: NonNullable<MinecraftAgentWorldState['sharedContainers']>[number]): string {
+  const name = container.name || container.kind || '容器';
+  const status = container.status ? `状态${container.status}` : '';
+  const distance = container.distance !== undefined ? `距离${container.distance.toFixed(1)}格` : '';
+  const position = container.position ? `位置${formatMinecraftPosition(container.position)}` : '';
+  const items = formatMinecraftItemCounts(container.items, 5);
+
+  return [name, status, distance, position, items ? `物品${items}` : ''].filter(Boolean).join(' ');
+}
+
+function formatMinecraftBlockInteractionState(blockInteraction?: MinecraftAgentWorldState['blockInteraction']): string {
+  if (!blockInteraction) {
+    return '';
+  }
+
+  const target = blockInteraction.block || blockInteraction.item || '方块';
+  const action = blockInteraction.action ? `动作${blockInteraction.action}` : '';
+  const status = blockInteraction.status ? `状态${blockInteraction.status}` : '';
+  const position = blockInteraction.position ? `位置${formatMinecraftPosition(blockInteraction.position)}` : '';
+  const progress = blockInteraction.progress !== undefined ? `进度${blockInteraction.progress}` : '';
+
+  return [target, action, status, position, progress].filter(Boolean).join(' ');
+}
+
+function formatMinecraftCollaborationState(worldState?: MinecraftAgentWorldState | null): string {
+  if (!worldState) {
+    return '';
+  }
+
+  const player = worldState.trackedPlayer;
+  const playerLine = player
+    ? `协作对象：${formatMinecraftPlayerState(player)}${player.distance !== undefined && player.distance > 8 ? '；距离偏远，优先找回或等待' : ''}`
+    : '';
+  const nearbyPlayers = worldState.nearbyPlayers?.length
+    ? `附近队友：${worldState.nearbyPlayers.slice(0, 3).map(formatMinecraftPlayerState).join('、')}`
+    : '';
+  const containers = worldState.sharedContainers?.length
+    ? `共享容器：${worldState.sharedContainers.slice(0, 3).map(formatMinecraftContainerState).join('、')}`
+    : '';
+  const blockInteraction = formatMinecraftBlockInteractionState(worldState.blockInteraction);
+  const rules =
+    '协作规则：跟随保持 3-5 格，不站在用户正前方/脚下，不挖用户脚下方块；距离超过 8 格先等待或找回；危险/低血量优先保护；共享箱子只存放富余资源，不抢用户正在用的物品。';
+
+  return [playerLine, nearbyPlayers, containers, blockInteraction ? `当前交互：${blockInteraction}` : '', rules].filter(Boolean).join('；');
+}
+
 function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null): string {
   if (!worldState) {
     return '';
   }
 
   const position = worldState.position
-    ? `位置：${worldState.position.x.toFixed(1)}, ${worldState.position.y.toFixed(1)}, ${worldState.position.z.toFixed(1)}`
+    ? `位置：${formatMinecraftPosition(worldState.position)}`
     : '';
   const health =
     worldState.health !== undefined ? `血量：${worldState.health}${worldState.maxHealth !== undefined ? `/${worldState.maxHealth}` : ''}` : '';
@@ -188,7 +266,24 @@ function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null)
     : '';
   const path = formatMinecraftPathState(worldState.path);
   const danger = formatMinecraftDangerState(worldState.danger);
-  const parts = [position, health, food, place ? `地点：${place}` : '', held, trackedPlayer, nearbyPlayers, path, danger, nearby].filter(Boolean);
+  const containers = worldState.sharedContainers?.length
+    ? `共享容器：${worldState.sharedContainers.slice(0, 3).map(formatMinecraftContainerState).join('、')}`
+    : '';
+  const blockInteraction = formatMinecraftBlockInteractionState(worldState.blockInteraction);
+  const parts = [
+    position,
+    health,
+    food,
+    place ? `地点：${place}` : '',
+    held,
+    trackedPlayer,
+    nearbyPlayers,
+    path,
+    danger,
+    containers,
+    blockInteraction ? `当前交互：${blockInteraction}` : '',
+    nearby
+  ].filter(Boolean);
 
   return parts.length > 0 ? `身体状态：${parts.join('；')}` : '';
 }
@@ -244,6 +339,7 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
     status.lastLog ? `最近反馈：${status.lastLog}` : '',
     formatMinecraftRecentChat(status),
     formatMinecraftWorldState(status.worldState),
+    formatMinecraftCollaborationState(status.worldState),
     inventoryItems ? `背包：${inventoryItems}` : status.lastInventoryAt > 0 ? '背包：空' : '',
     !status.connected ? '提示：还没有连接到她的 Minecraft 身体，需要先启动 mc-agent，并让独立账号进入同一个 LAN 世界。' : ''
   ]
@@ -272,6 +368,9 @@ export function buildGameCompanionPrompt(
     game === 'minecraft' ? formatMinecraftAgentStatus(minecraftStatus) : '',
     minecraftDisconnected,
     '按照游戏同伴的方式回应：只在有明确、有用、不会打断用户的观察时说一小句，例如危险、资源、路线、下一步、快天黑、血量或背包风险。',
+    game === 'minecraft'
+      ? '多人协作优先级：先保证用户安全和不挡路，再完成当前目标；跟随/保护/分工/共享箱子都要尊重“3-5 格距离、超过 8 格先等待或找回、不抢用户资源”。'
+      : '',
     minecraftStatus?.pendingTask
       ? '她还在做上一个游戏动作：有新内容就说一句，没新内容就安静；不要派新任务。'
       : '如果她现在空闲，可以主动挑下一步：要么说一句接下来想干什么，要么等待用户明确指令。不要为了凑任务硬编动作。',

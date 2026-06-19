@@ -3,8 +3,10 @@ import { EventEmitter } from 'node:events';
 import { nativeImage } from 'electron';
 import type {
   AppConfig,
+  MinecraftAgentBlockInteractionState,
   MinecraftAgentChatMessage,
   MinecraftAgentChatResult,
+  MinecraftAgentContainerState,
   MinecraftAgentEvent,
   MinecraftAgentDangerState,
   MinecraftAgentInventoryResponse,
@@ -509,6 +511,82 @@ function normalizeDangerState(value: unknown, health: number | undefined): Minec
   return hasUsefulState ? state : null;
 }
 
+function normalizeContainerState(value: unknown, fallbackName?: string): MinecraftAgentContainerState | null {
+  if (!isRecord(value)) {
+    const name = itemLabel(value) || fallbackName;
+    return name ? { updatedAt: Date.now(), name } : null;
+  }
+
+  const kind = stringOrUndefined(value.kind ?? value.type ?? value.containerType ?? value.container_type) || 'container';
+  const name =
+    stringOrUndefined(value.name) ||
+    stringOrUndefined(value.label) ||
+    stringOrUndefined(value.id) ||
+    stringOrUndefined(value.displayName) ||
+    stringOrUndefined(value.display_name) ||
+    fallbackName;
+  const status = stringOrUndefined(value.status ?? value.state);
+  const distance = numberOrUndefined(value.distance ?? value.dist ?? value.range);
+  const position = normalizePosition(value.position ?? value.pos ?? value.location ?? value.coords ?? value.xyz ?? value);
+  const items = normalizeInventory(value.items ?? value.inventory ?? value.contents);
+  const state: MinecraftAgentContainerState = { updatedAt: Date.now() };
+
+  if (kind) state.kind = kind;
+  if (name) state.name = name;
+  if (status) state.status = status;
+  if (distance !== undefined) state.distance = distance;
+  if (position) state.position = position;
+  if (items && Object.keys(items).length > 0) state.items = items;
+
+  const hasUsefulState = Object.entries(state).some(([key, itemValue]) => key !== 'updatedAt' && itemValue !== undefined && itemValue !== null);
+  return hasUsefulState ? state : null;
+}
+
+function normalizeContainerList(value: unknown): MinecraftAgentContainerState[] | undefined {
+  let containers: MinecraftAgentContainerState[] = [];
+  if (Array.isArray(value)) {
+    containers = value.map((item) => normalizeContainerState(item)).filter((item): item is MinecraftAgentContainerState => Boolean(item));
+  } else if (isRecord(value)) {
+    containers = Object.entries(value)
+      .map(([name, raw]) => normalizeContainerState(raw, name))
+      .filter((item): item is MinecraftAgentContainerState => Boolean(item));
+  } else {
+    const container = normalizeContainerState(value);
+    if (container) {
+      containers = [container];
+    }
+  }
+
+  return containers.length > 0 ? containers.slice(0, 8) : undefined;
+}
+
+function normalizeBlockInteractionState(value: unknown): MinecraftAgentBlockInteractionState | null {
+  if (!isRecord(value)) {
+    const status = stringOrUndefined(value);
+    return status ? { updatedAt: Date.now(), status } : null;
+  }
+
+  const action = stringOrUndefined(value.action ?? value.kind ?? value.type ?? value.operation);
+  const status = stringOrUndefined(value.status ?? value.state ?? value.phase);
+  const block = itemLabel(value.block ?? value.blockType ?? value.block_type ?? value.targetBlock ?? value.target_block);
+  const item = itemLabel(value.item ?? value.tool ?? value.using ?? value.heldItem ?? value.held_item);
+  const position = normalizePosition(value.position ?? value.pos ?? value.location ?? value.coords ?? value.xyz ?? value.target);
+  const progress = numberOrUndefined(value.progress ?? value.progressPct ?? value.progress_pct ?? value.percent);
+  const remainingMs = numberOrUndefined(value.remainingMs ?? value.remaining_ms ?? value.etaMs ?? value.eta_ms);
+  const state: MinecraftAgentBlockInteractionState = { updatedAt: Date.now() };
+
+  if (action) state.action = action;
+  if (status) state.status = status;
+  if (block) state.block = block;
+  if (item) state.item = item;
+  if (position) state.position = position;
+  if (progress !== undefined) state.progress = progress;
+  if (remainingMs !== undefined) state.remainingMs = remainingMs;
+
+  const hasUsefulState = Object.entries(state).some(([key, itemValue]) => key !== 'updatedAt' && itemValue !== undefined && itemValue !== null);
+  return hasUsefulState ? state : null;
+}
+
 function statusCandidates(frame: Record<string, unknown>): Record<string, unknown>[] {
   const candidates = [frame];
   for (let index = 0; index < candidates.length && index < 12; index += 1) {
@@ -557,6 +635,33 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   const selectedItem = itemLabel(findStatusValue(candidates, ['selectedItem', 'selected_item', 'heldItem', 'held_item', 'mainHand', 'main_hand']));
   const pathTarget = normalizeTargetState(findStatusValue(candidates, ['target', 'currentTarget', 'current_target', 'destination', 'dest', 'goalTarget', 'goal_target', 'blockTarget', 'block_target']), 'target');
   const path = normalizePathState(findStatusValue(candidates, ['path', 'pathState', 'path_state', 'pathfinding', 'navigation', 'nav', 'movement', 'route']), pathTarget);
+  const sharedContainers = normalizeContainerList(
+    findStatusValue(candidates, [
+      'sharedContainers',
+      'shared_containers',
+      'containers',
+      'nearbyContainers',
+      'nearby_containers',
+      'chests',
+      'storage',
+      'storageContainers',
+      'storage_containers'
+    ])
+  );
+  const blockInteraction = normalizeBlockInteractionState(
+    findStatusValue(candidates, [
+      'blockInteraction',
+      'block_interaction',
+      'currentInteraction',
+      'current_interaction',
+      'blockProgress',
+      'block_progress',
+      'mining',
+      'digging',
+      'currentAction',
+      'current_action'
+    ])
+  );
 
   const worldState: MinecraftAgentWorldState = {
     updatedAt: Date.now()
@@ -589,6 +694,8 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   if (nearbyPlayers) worldState.nearbyPlayers = nearbyPlayers;
   if (path) worldState.path = path;
   if (danger) worldState.danger = danger;
+  if (sharedContainers) worldState.sharedContainers = sharedContainers;
+  if (blockInteraction) worldState.blockInteraction = blockInteraction;
 
   const hasUsefulState = Object.entries(worldState).some(([key, value]) => key !== 'updatedAt' && value !== undefined && value !== null);
   return hasUsefulState ? worldState : null;
@@ -626,6 +733,25 @@ function cloneDangerState(dangerState: MinecraftAgentDangerState): MinecraftAgen
   };
 }
 
+function cloneContainerState(container: MinecraftAgentContainerState): MinecraftAgentContainerState {
+  const clone: MinecraftAgentContainerState = { ...container };
+  if (container.position) {
+    clone.position = { ...container.position };
+  }
+  if (container.items) {
+    clone.items = { ...container.items };
+  }
+  return clone;
+}
+
+function cloneBlockInteractionState(blockInteraction: MinecraftAgentBlockInteractionState): MinecraftAgentBlockInteractionState {
+  const clone: MinecraftAgentBlockInteractionState = { ...blockInteraction };
+  if (blockInteraction.position) {
+    clone.position = { ...blockInteraction.position };
+  }
+  return clone;
+}
+
 function cloneWorldState(worldState: MinecraftAgentWorldState | null): MinecraftAgentWorldState | null {
   if (!worldState) {
     return null;
@@ -652,6 +778,12 @@ function cloneWorldState(worldState: MinecraftAgentWorldState | null): Minecraft
   }
   if (worldState.danger) {
     clone.danger = cloneDangerState(worldState.danger);
+  }
+  if (worldState.sharedContainers) {
+    clone.sharedContainers = worldState.sharedContainers.map(cloneContainerState);
+  }
+  if (worldState.blockInteraction) {
+    clone.blockInteraction = cloneBlockInteractionState(worldState.blockInteraction);
   }
   return clone;
 }
