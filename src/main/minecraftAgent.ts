@@ -4,11 +4,14 @@ import { nativeImage } from 'electron';
 import type {
   AppConfig,
   MinecraftAgentEvent,
+  MinecraftAgentDangerState,
   MinecraftAgentInventoryResponse,
+  MinecraftAgentPathState,
   MinecraftAgentPlayerState,
   MinecraftAgentScreenshot,
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
+  MinecraftAgentTargetState,
   MinecraftAgentTaskResult,
   MinecraftAgentWorldState
 } from '../shared/types';
@@ -351,6 +354,118 @@ function normalizePlayerList(value: unknown): MinecraftAgentPlayerState[] | unde
   return unique.length > 0 ? unique.slice(0, 8) : undefined;
 }
 
+function normalizeTargetState(value: unknown, fallbackKind?: string): MinecraftAgentTargetState | null {
+  if (!isRecord(value)) {
+    const name = itemLabel(value);
+    return name ? { updatedAt: Date.now(), kind: fallbackKind, name } : null;
+  }
+
+  const kind = stringOrUndefined(value.kind ?? value.category ?? value.type) || fallbackKind;
+  const name =
+    stringOrUndefined(value.name) ||
+    stringOrUndefined(value.id) ||
+    stringOrUndefined(value.label) ||
+    stringOrUndefined(value.displayName) ||
+    stringOrUndefined(value.display_name);
+  const status = stringOrUndefined(value.status ?? value.state);
+  const distance = numberOrUndefined(value.distance ?? value.dist ?? value.range);
+  const position = normalizePosition(value.position ?? value.pos ?? value.location ?? value.coords ?? value.xyz ?? value);
+  const block = itemLabel(value.block ?? value.blockType ?? value.block_type);
+  const item = itemLabel(value.item ?? value.itemType ?? value.item_type);
+  const state: MinecraftAgentTargetState = { updatedAt: Date.now() };
+
+  if (kind) state.kind = kind;
+  if (name) state.name = name;
+  if (status) state.status = status;
+  if (distance !== undefined) state.distance = distance;
+  if (position) state.position = position;
+  if (block) state.block = block;
+  if (item) state.item = item;
+
+  const hasUsefulState = Object.entries(state).some(([key, itemValue]) => key !== 'updatedAt' && itemValue !== undefined && itemValue !== null);
+  return hasUsefulState ? state : null;
+}
+
+function normalizePathState(value: unknown, fallbackTarget: MinecraftAgentTargetState | null): MinecraftAgentPathState | null {
+  if (!isRecord(value)) {
+    const status = stringOrUndefined(value);
+    return status ? { updatedAt: Date.now(), status, ...(fallbackTarget ? { target: fallbackTarget } : {}) } : fallbackTarget ? { updatedAt: Date.now(), target: fallbackTarget } : null;
+  }
+
+  const status = stringOrUndefined(value.status ?? value.state ?? value.phase);
+  const target = normalizeTargetState(value.target ?? value.destination ?? value.dest ?? value.goal ?? value.currentTarget ?? value.current_target, 'path_target') || fallbackTarget;
+  const distance = numberOrUndefined(value.distance ?? value.dist ?? value.remainingDistance ?? value.remaining_distance);
+  const progress = numberOrUndefined(value.progress ?? value.progressPct ?? value.progress_pct);
+  const stuckValue = value.stuck ?? value.isStuck ?? value.blocked ?? value.isBlocked;
+  const stuck = typeof stuckValue === 'boolean' ? stuckValue : typeof stuckValue === 'string' ? /true|yes|blocked|stuck/i.test(stuckValue) : undefined;
+  const blockedBy = itemLabel(value.blockedBy ?? value.blocked_by ?? value.obstacle);
+  const lastError = stringOrUndefined(value.error ?? value.lastError ?? value.last_error ?? value.reason);
+  const state: MinecraftAgentPathState = { updatedAt: Date.now() };
+
+  if (status) state.status = status;
+  if (target) state.target = target;
+  if (distance !== undefined) state.distance = distance;
+  if (progress !== undefined) state.progress = progress;
+  if (stuck !== undefined) state.stuck = stuck;
+  if (blockedBy) state.blockedBy = blockedBy;
+  if (lastError) state.lastError = lastError;
+
+  const hasUsefulState = Object.entries(state).some(([key, itemValue]) => key !== 'updatedAt' && itemValue !== undefined && itemValue !== null);
+  return hasUsefulState ? state : null;
+}
+
+function normalizeStringList(value: unknown): string[] | undefined {
+  let items: string[] = [];
+  if (Array.isArray(value)) {
+    items = value.map((item) => itemLabel(item)).filter((item): item is string => Boolean(item));
+  } else if (isRecord(value)) {
+    items = Object.entries(value)
+      .map(([key, raw]) => {
+        const label = itemLabel(raw);
+        const count = numberOrUndefined(raw);
+        return label || (count !== undefined ? `${key}×${count}` : key);
+      })
+      .filter(Boolean);
+  } else {
+    const label = itemLabel(value);
+    if (label) {
+      items = [label];
+    }
+  }
+
+  const unique = Array.from(new Set(items)).slice(0, 10);
+  return unique.length > 0 ? unique : undefined;
+}
+
+function normalizeDangerState(value: unknown, health: number | undefined): MinecraftAgentDangerState | null {
+  const state: MinecraftAgentDangerState = { updatedAt: Date.now() };
+  const lowHealth = health !== undefined && health <= 6;
+
+  if (isRecord(value)) {
+    const level = stringOrUndefined(value.level ?? value.severity ?? value.status ?? value.risk);
+    const causes = normalizeStringList(value.causes ?? value.cause ?? value.hazards ?? value.hazard ?? value.reasons ?? value.reason);
+    const nearbyHostiles = normalizeStringList(value.nearbyHostiles ?? value.nearby_hostiles ?? value.hostiles ?? value.mobs ?? value.attackers ?? value.attacker);
+    if (level) state.level = level;
+    if (causes) state.causes = causes;
+    if (nearbyHostiles) state.nearbyHostiles = nearbyHostiles;
+  } else {
+    const causes = normalizeStringList(value);
+    if (causes) {
+      state.causes = causes;
+    }
+  }
+
+  if (lowHealth) {
+    state.lowHealth = true;
+    if (!state.level) {
+      state.level = health <= 3 ? 'critical' : 'high';
+    }
+  }
+
+  const hasUsefulState = Object.entries(state).some(([key, itemValue]) => key !== 'updatedAt' && itemValue !== undefined && itemValue !== null);
+  return hasUsefulState ? state : null;
+}
+
 function statusCandidates(frame: Record<string, unknown>): Record<string, unknown>[] {
   const candidates = [frame];
   for (let index = 0; index < candidates.length && index < 12; index += 1) {
@@ -397,6 +512,8 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   );
   const nearbyPlayers = normalizePlayerList(findStatusValue(candidates, ['nearbyPlayers', 'nearby_players', 'players', 'otherPlayers', 'other_players']));
   const selectedItem = itemLabel(findStatusValue(candidates, ['selectedItem', 'selected_item', 'heldItem', 'held_item', 'mainHand', 'main_hand']));
+  const pathTarget = normalizeTargetState(findStatusValue(candidates, ['target', 'currentTarget', 'current_target', 'destination', 'dest', 'goalTarget', 'goal_target', 'blockTarget', 'block_target']), 'target');
+  const path = normalizePathState(findStatusValue(candidates, ['path', 'pathState', 'path_state', 'pathfinding', 'navigation', 'nav', 'movement', 'route']), pathTarget);
 
   const worldState: MinecraftAgentWorldState = {
     updatedAt: Date.now()
@@ -410,6 +527,7 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   const dimension = findStatusString(candidates, ['dimension', 'world', 'realm']);
   const biome = findStatusString(candidates, ['biome']);
   const gameMode = findStatusString(candidates, ['gameMode', 'game_mode', 'mode']);
+  const danger = normalizeDangerState(findStatusValue(candidates, ['danger', 'dangerState', 'danger_state', 'risk', 'threat', 'threats', 'hazard', 'hazards']), health);
 
   if (health !== undefined) worldState.health = health;
   if (maxHealth !== undefined) worldState.maxHealth = maxHealth;
@@ -426,6 +544,8 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   if (nearbyEntities) worldState.nearbyEntities = nearbyEntities;
   if (trackedPlayer) worldState.trackedPlayer = trackedPlayer;
   if (nearbyPlayers) worldState.nearbyPlayers = nearbyPlayers;
+  if (path) worldState.path = path;
+  if (danger) worldState.danger = danger;
 
   const hasUsefulState = Object.entries(worldState).some(([key, value]) => key !== 'updatedAt' && value !== undefined && value !== null);
   return hasUsefulState ? worldState : null;
@@ -437,6 +557,30 @@ function clonePlayerState(player: MinecraftAgentPlayerState): MinecraftAgentPlay
     clone.position = { ...player.position };
   }
   return clone;
+}
+
+function cloneTargetState(target: MinecraftAgentTargetState): MinecraftAgentTargetState {
+  const clone: MinecraftAgentTargetState = { ...target };
+  if (target.position) {
+    clone.position = { ...target.position };
+  }
+  return clone;
+}
+
+function clonePathState(pathState: MinecraftAgentPathState): MinecraftAgentPathState {
+  const clone: MinecraftAgentPathState = { ...pathState };
+  if (pathState.target) {
+    clone.target = cloneTargetState(pathState.target);
+  }
+  return clone;
+}
+
+function cloneDangerState(dangerState: MinecraftAgentDangerState): MinecraftAgentDangerState {
+  return {
+    ...dangerState,
+    causes: dangerState.causes ? [...dangerState.causes] : undefined,
+    nearbyHostiles: dangerState.nearbyHostiles ? [...dangerState.nearbyHostiles] : undefined
+  };
 }
 
 function cloneWorldState(worldState: MinecraftAgentWorldState | null): MinecraftAgentWorldState | null {
@@ -459,6 +603,12 @@ function cloneWorldState(worldState: MinecraftAgentWorldState | null): Minecraft
   }
   if (worldState.nearbyPlayers) {
     clone.nearbyPlayers = worldState.nearbyPlayers.map(clonePlayerState);
+  }
+  if (worldState.path) {
+    clone.path = clonePathState(worldState.path);
+  }
+  if (worldState.danger) {
+    clone.danger = cloneDangerState(worldState.danger);
   }
   return clone;
 }

@@ -7,7 +7,10 @@ import {
   ConversationMessage,
   ActionResult,
   MemoryState,
+  MinecraftAgentDangerState,
+  MinecraftAgentPathState,
   MinecraftAgentPlayerState,
+  MinecraftAgentTargetState,
   MinecraftAgentWorldState,
   Mood,
   ProviderEndpointConfig,
@@ -261,6 +264,43 @@ function formatMinecraftPlayerState(player: MinecraftAgentPlayerState): string {
   return [name, distance, position, health, held].filter(Boolean).join('；');
 }
 
+function formatMinecraftTargetState(target: MinecraftAgentTargetState): string {
+  const name = target.name || target.block || target.item || target.kind || '目标';
+  const status = target.status ? `状态 ${target.status}` : '';
+  const distance = target.distance !== undefined ? `距离 ${target.distance.toFixed(1)} 格` : '';
+  const position = target.position ? `位置 ${target.position.x.toFixed(1)}, ${target.position.y.toFixed(1)}, ${target.position.z.toFixed(1)}` : '';
+
+  return [name, status, distance, position].filter(Boolean).join('；');
+}
+
+function formatMinecraftPathState(path?: MinecraftAgentPathState): string {
+  if (!path) {
+    return '';
+  }
+
+  const status = path.status ? `路径状态 ${path.status}` : '路径状态 有目标';
+  const target = path.target ? `目标 ${formatMinecraftTargetState(path.target)}` : '';
+  const distance = path.distance !== undefined ? `剩余 ${path.distance.toFixed(1)} 格` : '';
+  const progress = path.progress !== undefined ? `进度 ${path.progress}` : '';
+  const stuck = path.stuck ? '疑似卡住' : '';
+  const blockedBy = path.blockedBy ? `受阻于 ${path.blockedBy}` : '';
+  const error = path.lastError ? `原因 ${path.lastError}` : '';
+
+  return [status, target, distance, progress, stuck, blockedBy, error].filter(Boolean).join('；');
+}
+
+function formatMinecraftDangerState(danger?: MinecraftAgentDangerState): string {
+  if (!danger) {
+    return '';
+  }
+
+  const level = danger.level ? `危险等级 ${danger.level}` : danger.lowHealth ? '危险等级 低血量' : '危险状态 有风险';
+  const causes = danger.causes?.length ? `原因 ${danger.causes.slice(0, 5).join('、')}` : '';
+  const hostiles = danger.nearbyHostiles?.length ? `敌对/威胁 ${danger.nearbyHostiles.slice(0, 5).join('、')}` : '';
+
+  return [level, causes, hostiles].filter(Boolean).join('；');
+}
+
 function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null): string {
   if (!worldState) {
     return '身体状态：暂无真实数据。';
@@ -285,7 +325,9 @@ function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null)
   const nearbyPlayers = worldState.nearbyPlayers?.length
     ? `附近玩家 ${worldState.nearbyPlayers.slice(0, 5).map(formatMinecraftPlayerState).join('；')}`
     : '';
-  const parts = [position, health, food, place ? `地点 ${place}` : '', held, equipment, trackedPlayer, nearbyPlayers, nearby].filter(Boolean);
+  const path = formatMinecraftPathState(worldState.path);
+  const danger = formatMinecraftDangerState(worldState.danger);
+  const parts = [position, health, food, place ? `地点 ${place}` : '', held, equipment, trackedPlayer, nearbyPlayers, path, danger, nearby].filter(Boolean);
 
   return parts.length > 0 ? `身体状态：${parts.join('；')}。更新时间：${new Date(worldState.updatedAt).toLocaleString('zh-CN')}。` : '身体状态：暂无真实数据。';
 }
