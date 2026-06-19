@@ -18,7 +18,17 @@ const CAPABILITIES = [
   'command_follow_fallback',
   'entity_debug',
   'shared_containers',
-  'block_interaction'
+  'block_interaction',
+  'autonomous_free_play',
+  'resource_gathering',
+  'crop_farming',
+  'animal_husbandry',
+  'crafting',
+  'fishing',
+  'villager_trading',
+  'torch_placement',
+  'container_inspection',
+  'truthful_task_blockers'
 ];
 const HOSTILE_NAMES = new Set([
   'blaze',
@@ -51,6 +61,113 @@ const HOSTILE_NAMES = new Set([
 ]);
 const FOOD_HINTS = ['bread', 'apple', 'beef', 'porkchop', 'chicken', 'mutton', 'cod', 'salmon', 'potato', 'carrot', 'stew', 'berries'];
 const WOOD_LOG_NAMES = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
+const ORE_BLOCK_NAMES = {
+  coal: ['coal_ore', 'deepslate_coal_ore'],
+  iron: ['iron_ore', 'deepslate_iron_ore'],
+  copper: ['copper_ore', 'deepslate_copper_ore'],
+  gold: ['gold_ore', 'deepslate_gold_ore', 'nether_gold_ore'],
+  redstone: ['redstone_ore', 'deepslate_redstone_ore'],
+  lapis: ['lapis_ore', 'deepslate_lapis_ore'],
+  emerald: ['emerald_ore', 'deepslate_emerald_ore'],
+  diamond: ['diamond_ore', 'deepslate_diamond_ore'],
+  quartz: ['nether_quartz_ore'],
+  ancient_debris: ['ancient_debris']
+};
+const MATERIAL_BLOCK_NAMES = {
+  stone: ['stone', 'cobblestone'],
+  dirt: ['dirt', 'grass_block', 'coarse_dirt'],
+  sand: ['sand', 'red_sand'],
+  gravel: ['gravel'],
+  clay: ['clay'],
+  obsidian: ['obsidian'],
+  netherrack: ['netherrack'],
+  basalt: ['basalt', 'blackstone']
+};
+const CROP_RULES = {
+  wheat: { seed: 'wheat_seeds', matureAge: 7 },
+  carrots: { seed: 'carrot', matureAge: 7 },
+  potatoes: { seed: 'potato', matureAge: 7 },
+  beetroots: { seed: 'beetroot_seeds', matureAge: 3 }
+};
+const TALL_PLANT_NAMES = ['sugar_cane', 'bamboo', 'cactus'];
+const HARVEST_BLOCK_NAMES = ['pumpkin', 'melon', 'sweet_berry_bush', ...TALL_PLANT_NAMES];
+const PASSIVE_FOOD_MOBS = new Set(['cow', 'pig', 'chicken', 'sheep', 'rabbit']);
+const BREEDING_RULES = [
+  { mobs: ['cow', 'sheep'], foods: ['wheat'] },
+  { mobs: ['pig'], foods: ['carrot', 'potato', 'beetroot'] },
+  { mobs: ['chicken'], foods: ['wheat_seeds', 'beetroot_seeds', 'melon_seeds', 'pumpkin_seeds'] },
+  { mobs: ['rabbit'], foods: ['carrot', 'dandelion'] }
+];
+const VILLAGER_NAMES = new Set(['villager', 'wandering_trader']);
+const SIMPLE_CRAFT_TARGETS = {
+  plank: 'oak_planks',
+  planks: 'oak_planks',
+  sticks: 'stick',
+  stick: 'stick',
+  torches: 'torch',
+  torch: 'torch',
+  crafting_table: 'crafting_table',
+  workbench: 'crafting_table',
+  furnace: 'furnace',
+  chest: 'chest',
+  door: 'oak_door',
+  boat: 'oak_boat',
+  bed: 'white_bed',
+  bread: 'bread',
+  shield: 'shield',
+  bowl: 'bowl',
+  bucket: 'bucket',
+  stone_pickaxe: 'stone_pickaxe',
+  stone_axe: 'stone_axe',
+  stone_sword: 'stone_sword',
+  stone_shovel: 'stone_shovel',
+  iron_pickaxe: 'iron_pickaxe',
+  iron_axe: 'iron_axe',
+  iron_sword: 'iron_sword',
+  iron_shovel: 'iron_shovel',
+  pickaxe: 'wooden_pickaxe',
+  axe: 'wooden_axe',
+  sword: 'wooden_sword',
+  shovel: 'wooden_shovel'
+};
+const COMPLEX_TASK_TOPICS = [
+  {
+    words: ['redstone machine', 'redstone automation', 'piston', 'hopper', 'automation', 'auto farm', 'machine'],
+    text: 'Redstone automation needs a blueprint, exact location, materials, and block-by-block placement support before I can build it safely.'
+  },
+  {
+    words: ['enchant', 'enchantment', 'anvil', 'xp farm'],
+    text: 'Enchanting needs an enchanting table/anvil location, lapis, XP, and the item to enchant.'
+  },
+  {
+    words: ['potion', 'brew', 'brewing'],
+    text: 'Brewing needs a brewing stand, bottles, blaze powder, nether wart, and a target potion recipe.'
+  },
+  {
+    words: ['smelt', 'smelting', 'cook ore', 'furnace fuel'],
+    text: 'Smelting needs a visible furnace or a placed furnace plan, fuel, and a target input item. I can gather ore, gather coal, or craft a furnace first.'
+  },
+  {
+    words: ['tame', 'horse', 'wolf', 'cat', 'pet'],
+    text: 'Taming needs a visible target animal, the right item, and repeated interaction/state checks. I can find animals first, but reliable taming is not wired yet.'
+  },
+  {
+    words: ['nether', 'portal', 'fortress', 'blaze'],
+    text: 'Nether tasks need portal access and stronger navigation/danger handling; I can prepare supplies first.'
+  },
+  {
+    words: ['end dragon', 'ender dragon', 'stronghold', 'end portal', 'end city', 'elytra'],
+    text: 'End-game tasks need multi-step planning: gear, eyes of ender, stronghold route, beds/arrows, and recovery plan.'
+  },
+  {
+    words: ['wither', 'beacon'],
+    text: 'Wither/beacon tasks need soul sand, skulls, arena safety, gear, and a fight/build plan.'
+  },
+  {
+    words: ['mega base', 'castle', 'city', 'statue', 'blueprint', 'build large', 'big build'],
+    text: 'Large builds need a blueprint, material list, exact origin, orientation, and block placement planner.'
+  }
+];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_CONFIG_PATH = path.join(ROOT, 'config.json');
@@ -62,6 +179,7 @@ let Movements = null;
 let goals = null;
 let minecraftData = null;
 let WebSocketServer = null;
+let Vec3 = null;
 
 let config = null;
 let bot = null;
@@ -118,11 +236,12 @@ function asPositiveInteger(value, fallback = null) {
 
 async function loadDependencies() {
   try {
-    const [mineflayerModule, pathfinderModule, minecraftDataModule, wsModule] = await Promise.all([
+    const [mineflayerModule, pathfinderModule, minecraftDataModule, wsModule, vec3Module] = await Promise.all([
       import('mineflayer'),
       import('mineflayer-pathfinder'),
       import('minecraft-data'),
-      import('ws')
+      import('ws'),
+      import('vec3')
     ]);
     const pathfinderExports = pathfinderModule.default ?? pathfinderModule;
     mineflayer = mineflayerModule.default ?? mineflayerModule;
@@ -131,6 +250,7 @@ async function loadDependencies() {
     goals = pathfinderModule.goals ?? pathfinderExports.goals;
     minecraftData = minecraftDataModule.default ?? minecraftDataModule;
     WebSocketServer = wsModule.WebSocketServer;
+    Vec3 = vec3Module.Vec3 ?? vec3Module.default?.Vec3;
   } catch (error) {
     console.error('[virtual-lover-mc-agent] Missing dependencies. Run npm install in integrations/minecraft-agent first.');
     console.error(error instanceof Error ? error.message : String(error));
@@ -911,6 +1031,99 @@ async function collectNearbyDrops(maxDistance = 6, maxItems = 6) {
   return collected;
 }
 
+function itemDefinition(name) {
+  return mcData?.itemsByName?.[name] || null;
+}
+
+function inventoryItemByNames(names) {
+  const wanted = new Set(names);
+  return bot.inventory.items().find((item) => wanted.has(item.name)) || null;
+}
+
+function blockIdsByNames(names) {
+  return names.map((name) => mcData.blocksByName[name]?.id).filter(Boolean);
+}
+
+function findNearestBlockByNames(names, maxDistance = config.behavior.searchRadius, origin = ownerOrBotPosition()) {
+  const ids = blockIdsByNames(names);
+  if (!ids.length) return null;
+  return findKnownBlockNear(ids, origin, maxDistance) || bot.findBlock({ matching: ids, maxDistance });
+}
+
+function findNearestExistingBlockSet(blockGroups, maxDistance = config.behavior.searchRadius) {
+  for (const [label, names] of blockGroups) {
+    const block = findNearestBlockByNames(names, maxDistance, ownerOrBotPosition());
+    if (block) return { label, names, block };
+  }
+  return null;
+}
+
+function cropOrHarvestableBlock(block) {
+  if (!block) return false;
+  const crop = CROP_RULES[block.name];
+  if (crop) return blockAge(block) >= crop.matureAge;
+  if (HARVEST_BLOCK_NAMES.includes(block.name)) return true;
+  return false;
+}
+
+function findHarvestableCropPositions(maxDistance = Math.min(config.behavior.searchRadius, 24), count = 12) {
+  return bot.findBlocks({
+    matching: cropOrHarvestableBlock,
+    maxDistance,
+    count
+  });
+}
+
+function entityDisplayName(entity) {
+  return String(entity?.name || entity?.displayName || entity?.type || '').toLowerCase();
+}
+
+function nearestEntityByNames(names, maxDistance = 16) {
+  const wanted = names instanceof Set ? names : new Set(names);
+  return Object.values(bot.entities)
+    .filter((entity) => entity && entity !== bot.entity && entity.position && wanted.has(entityDisplayName(entity)))
+    .map((entity) => ({ entity, distance: distanceToBot(entity) ?? 9999 }))
+    .filter(({ distance }) => distance <= maxDistance)
+    .sort((a, b) => a.distance - b.distance)[0]?.entity || null;
+}
+
+function blockAge(block) {
+  const properties = typeof block?.getProperties === 'function' ? block.getProperties() : block?._properties;
+  const age = properties?.age ?? properties?.AGE;
+  if (typeof age === 'number') return age;
+  const parsedAge = Number(age);
+  if (Number.isFinite(parsedAge)) return parsedAge;
+  return typeof block?.metadata === 'number' ? block.metadata : 0;
+}
+
+function complexTaskBlocker(text) {
+  const lower = text.toLowerCase();
+  return COMPLEX_TASK_TOPICS.find((topic) => topic.words.some((word) => lower.includes(word)))?.text || null;
+}
+
+function craftTargetFromTask(text) {
+  const lower = text.toLowerCase();
+  for (const [hint, target] of Object.entries(SIMPLE_CRAFT_TARGETS)) {
+    if (lower.includes(hint) || lower.includes(hint.replaceAll('_', ' '))) return target;
+  }
+  return null;
+}
+
+async function goNearBlock(block, distance = 2, status = 'moving') {
+  pathState = {
+    status,
+    target: {
+      type: 'block',
+      name: block.name,
+      position: vecToPlain(block.position),
+      distance: Number(bot.entity.position.distanceTo(block.position).toFixed(2))
+    },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, distance));
+}
+
 function isCreativeMode() {
   return String(bot?.game?.gameMode || '').toLowerCase() === 'creative';
 }
@@ -1058,7 +1271,50 @@ function hasPrimaryActionIntent(text) {
     'iron',
     'diamond',
     'stone',
-    'cobblestone'
+    'cobblestone',
+    'gold',
+    'redstone',
+    'lapis',
+    'emerald',
+    'copper',
+    'quartz',
+    'ancient debris',
+    'obsidian',
+    'dirt',
+    'sand',
+    'gravel',
+    'clay',
+    'farm',
+    'crop',
+    'harvest',
+    'plant',
+    'breed',
+    'breeding',
+    'fish',
+    'hunt',
+    'animal',
+    'meat',
+    'craft',
+    'make',
+    'first day',
+    'survival basics',
+    'survival prep',
+    'smelt',
+    'torch',
+    'light',
+    'chest',
+    'container',
+    'villager',
+    'trade',
+    'explore',
+    'wander',
+    'build',
+    'shelter',
+    'redstone',
+    'nether',
+    'end dragon',
+    'potion',
+    'enchant'
   ]);
 }
 
@@ -1246,7 +1502,7 @@ async function runTask(taskText, taskId, client) {
     finishTask('ok', resultText || `Completed: ${clean}`, typeof result === 'object' && result ? { keepPathState: result.keepPathState } : {});
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const status = /not found|cannot|no .*near|missing|failed|not connected|too long to decide path|unreachable|cannot reach/i.test(message)
+    const status = /not found|cannot|no .*near|missing|needs|requires|not wired|unavailable|failed|not connected|too long to decide path|unreachable|cannot reach/i.test(message)
       ? 'blocked'
       : 'error';
     finishTask(status, message);
@@ -1297,8 +1553,33 @@ async function executeTask(text) {
     return playAutonomously();
   }
 
-  if (taskIncludes(lower, ['eat', 'food', 'hungry'])) {
+  const complexBlocker = complexTaskBlocker(lower);
+  if (complexBlocker) {
+    throw new Error(complexBlocker);
+  }
+
+  if (taskIncludes(lower, ['first day', 'survival basics', 'survival prep', 'starter', 'prepare supplies', 'basic survival'])) {
+    return prepareSurvivalBasics();
+  }
+
+  if (taskIncludes(lower, ['farm', 'crop', 'harvest', 'replant', 'sugar cane', 'bamboo', 'cactus', 'pumpkin', 'melon', 'plant'])) {
+    return harvestCrops();
+  }
+
+  if (taskIncludes(lower, ['breed', 'breeding', 'feed animals', 'animal farm'])) {
+    return breedNearbyAnimals();
+  }
+
+  if (taskIncludes(lower, ['fish', 'fishing'])) {
+    return fishOnce();
+  }
+
+  if (taskIncludes(lower, ['eat', 'hungry'])) {
     return eatFood();
+  }
+
+  if (taskIncludes(lower, ['collect safe food', 'find food', 'food nearby', 'hunt', 'animal', 'meat', 'cow', 'pig', 'chicken', 'sheep', 'rabbit'])) {
+    return huntPassiveMob();
   }
 
   if (taskIncludes(lower, ['attack', 'fight', 'protect', 'kill hostile', 'zombie', 'skeleton', 'creeper'])) {
@@ -1317,24 +1598,48 @@ async function executeTask(text) {
     return goNearPlayer();
   }
 
+  if (taskIncludes(lower, ['craft', 'make ', 'create ', 'workbench', 'crafting table', 'furnace', 'chest', 'plank', 'stick', 'tool'])) {
+    return craftFromTask(lower);
+  }
+
+  if (taskIncludes(lower, ['torch', 'light up', 'lighting', 'dark area'])) {
+    return placeTorchNearby();
+  }
+
+  if (taskIncludes(lower, ['villager', 'trade', 'trading', 'wandering trader'])) {
+    return inspectNearestVillagerTrades();
+  }
+
+  if (taskIncludes(lower, ['chest', 'barrel', 'container', 'storage'])) {
+    return inspectNearestContainer();
+  }
+
   if (taskIncludes(lower, ['wood', 'log', 'tree', 'oak'])) {
     return digBlocks(WOOD_LOG_NAMES, 'wood');
   }
 
-  if (taskIncludes(lower, ['coal'])) {
-    return digBlocks(['coal_ore', 'deepslate_coal_ore'], 'coal ore');
+  for (const [label, blocks] of Object.entries(ORE_BLOCK_NAMES)) {
+    if (taskIncludes(lower, [label.replace('_', ' '), label])) {
+      return digBlocks(blocks, `${label.replace('_', ' ')} ore`);
+    }
   }
 
-  if (taskIncludes(lower, ['iron'])) {
-    return digBlocks(['iron_ore', 'deepslate_iron_ore'], 'iron ore');
+  for (const [label, blocks] of Object.entries(MATERIAL_BLOCK_NAMES)) {
+    if (taskIncludes(lower, [label])) {
+      return digBlocks(blocks, label);
+    }
   }
 
-  if (taskIncludes(lower, ['diamond'])) {
-    return digBlocks(['diamond_ore', 'deepslate_diamond_ore'], 'diamond ore');
+  if (taskIncludes(lower, ['mine', 'mining', 'ore', 'cave'])) {
+    return mineUsefulNearbyResource();
   }
 
-  if (taskIncludes(lower, ['stone', 'cobblestone'])) {
-    return digBlocks(['stone', 'cobblestone'], 'stone');
+  if (taskIncludes(lower, ['explore', 'wander', 'scout', 'look around'])) {
+    return wanderNearby('nearby area');
+  }
+
+  if (taskIncludes(lower, ['build', 'shelter', 'house', 'base'])) {
+    throw new Error('Building needs an exact location, size, material choice, and block placement plan. I can gather materials or place torches first.');
   }
 
   return goNearPlayer();
@@ -1436,6 +1741,12 @@ async function playAutonomously() {
     }
   }
 
+  const collectedDrops = await collectNearbyDrops(6, 6);
+  if (collectedDrops > 0) {
+    actions.push(`picked up ${collectedDrops} nearby drop${collectedDrops === 1 ? '' : 's'}`);
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
   if ((bot.food < 14 || bot.health < 14) && bot.inventory.items().some((item) => FOOD_HINTS.some((hint) => item.name.includes(hint)))) {
     actions.push(await eatFood());
     return `Free play: ${actions.join('; ')}.`;
@@ -1448,6 +1759,16 @@ async function playAutonomously() {
     return `Free play: ${actions.join('; ')}.`;
   }
 
+  if (findHarvestableCropPositions(18, 1).length) {
+    actions.push(await harvestCrops());
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
+  if (!isCreativeMode() && bot.food < 16 && nearestEntityByNames(PASSIVE_FOOD_MOBS, 14)) {
+    actions.push(await huntPassiveMob());
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
   const woodIds = WOOD_LOG_NAMES.map((name) => mcData.blocksByName[name]?.id).filter(Boolean);
   const nearbyWood = woodIds.length ? findKnownBlockNear(woodIds, ownerOrBotPosition(), Math.min(config.behavior.searchRadius, 18)) : null;
   if (!isCreativeMode() && nearbyWood && inventoryCount(WOOD_LOG_NAMES) < 8) {
@@ -1455,14 +1776,330 @@ async function playAutonomously() {
     return `Free play: ${actions.join('; ')}.`;
   }
 
-  const collectedDrops = await collectNearbyDrops(6, 6);
-  if (collectedDrops > 0) {
-    actions.push(`picked up ${collectedDrops} nearby drop${collectedDrops === 1 ? '' : 's'}`);
+  const usefulNearbyResource = findNearestExistingBlockSet(
+    [
+      ['coal ore', ORE_BLOCK_NAMES.coal],
+      ['iron ore', ORE_BLOCK_NAMES.iron],
+      ['stone', MATERIAL_BLOCK_NAMES.stone]
+    ],
+    14
+  );
+  if (!isCreativeMode() && usefulNearbyResource && Math.random() < 0.45) {
+    actions.push(await digBlocks(usefulNearbyResource.names, usefulNearbyResource.label));
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
+  if (inventoryItemByNames(['torch'])) {
+    try {
+      actions.push(await placeTorchNearby());
+      return `Free play: ${actions.join('; ')}.`;
+    } catch (error) {
+      log(`Autonomous torch placement skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (nearestEntityByNames(VILLAGER_NAMES, 10) && Math.random() < 0.35) {
+    actions.push(await inspectNearestVillagerTrades());
     return `Free play: ${actions.join('; ')}.`;
   }
 
   actions.push(await wanderNearby(isCreativeMode() ? 'nearby creative area' : 'nearby survival area'));
   return `Free play: ${actions.join('; ')}.`;
+}
+
+async function prepareSurvivalBasics() {
+  const actions = [];
+  if (!isCreativeMode() && inventoryCount(WOOD_LOG_NAMES) < 8 && findNearestBlockByNames(WOOD_LOG_NAMES, Math.min(config.behavior.searchRadius, 18))) {
+    actions.push(await digBlocks(WOOD_LOG_NAMES, 'wood'));
+    return `Survival prep: ${actions.join('; ')}.`;
+  }
+
+  if (!bot.inventory.items().some((item) => item.name === 'crafting_table') && !findNearestBlockByNames(['crafting_table'], 8, bot.entity.position)) {
+    try {
+      actions.push(await craftItemByName('crafting_table', 1));
+      return `Survival prep: ${actions.join('; ')}.`;
+    } catch (error) {
+      log(`Survival prep could not craft table: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  const stoneNearby = findNearestBlockByNames(MATERIAL_BLOCK_NAMES.stone, Math.min(config.behavior.searchRadius, 16), ownerOrBotPosition());
+  if (!isCreativeMode() && stoneNearby && inventoryCount(['cobblestone', 'stone']) < 12) {
+    actions.push(await digBlocks(MATERIAL_BLOCK_NAMES.stone, 'stone'));
+    return `Survival prep: ${actions.join('; ')}.`;
+  }
+
+  const coalNearby = findNearestBlockByNames(ORE_BLOCK_NAMES.coal, Math.min(config.behavior.searchRadius, 16), ownerOrBotPosition());
+  if (!isCreativeMode() && coalNearby && inventoryCount(['coal', 'charcoal']) < 4) {
+    actions.push(await digBlocks(ORE_BLOCK_NAMES.coal, 'coal ore'));
+    return `Survival prep: ${actions.join('; ')}.`;
+  }
+
+  if (bot.food < 16) {
+    try {
+      actions.push(await eatFood());
+      return `Survival prep: ${actions.join('; ')}.`;
+    } catch {
+      if (nearestEntityByNames(PASSIVE_FOOD_MOBS, 14)) {
+        actions.push(await huntPassiveMob());
+        return `Survival prep: ${actions.join('; ')}.`;
+      }
+    }
+  }
+
+  actions.push(await wanderNearby('safe survival prep area'));
+  return `Survival prep: ${actions.join('; ')}.`;
+}
+
+async function mineUsefulNearbyResource() {
+  const found = findNearestExistingBlockSet(
+    [
+      ['diamond ore', ORE_BLOCK_NAMES.diamond],
+      ['iron ore', ORE_BLOCK_NAMES.iron],
+      ['coal ore', ORE_BLOCK_NAMES.coal],
+      ['copper ore', ORE_BLOCK_NAMES.copper],
+      ['redstone ore', ORE_BLOCK_NAMES.redstone],
+      ['gold ore', ORE_BLOCK_NAMES.gold],
+      ['lapis ore', ORE_BLOCK_NAMES.lapis],
+      ['emerald ore', ORE_BLOCK_NAMES.emerald],
+      ['quartz ore', ORE_BLOCK_NAMES.quartz],
+      ['ancient debris', ORE_BLOCK_NAMES.ancient_debris],
+      ['stone', MATERIAL_BLOCK_NAMES.stone]
+    ],
+    config.behavior.searchRadius
+  );
+  if (!found) {
+    throw new Error('No useful mineable ore or stone found nearby.');
+  }
+  return digBlocks(found.names, found.label);
+}
+
+async function craftItemByName(itemName, amount = 1) {
+  const item = itemDefinition(itemName);
+  if (!item) {
+    throw new Error(`Craft target ${itemName} is not available in Minecraft ${bot.version}.`);
+  }
+
+  let craftingTable = null;
+  let recipe = bot.recipesFor(item.id, null, amount, null)[0];
+  if (!recipe) {
+    craftingTable = findNearestBlockByNames(['crafting_table'], 8, bot.entity.position);
+    if (craftingTable) {
+      await goNearBlock(craftingTable, 2, 'crafting');
+      recipe = bot.recipesFor(item.id, null, amount, craftingTable)[0];
+    }
+  }
+
+  if (!recipe) {
+    throw new Error(`No available recipe for ${itemName}. It may need missing materials or a nearby crafting table.`);
+  }
+
+  pathState = {
+    status: 'crafting',
+    target: { type: 'item', name: itemName },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.craft(recipe, amount, craftingTable);
+  publishInventory();
+  return `Crafted ${amount} ${itemName}.`;
+}
+
+async function craftFromTask(text) {
+  const target = craftTargetFromTask(text) || 'crafting_table';
+  return craftItemByName(target, 1);
+}
+
+async function harvestCrops() {
+  const positions = findHarvestableCropPositions(Math.min(config.behavior.searchRadius, 24), 12);
+
+  if (!positions.length) {
+    throw new Error('No mature crop or harvestable plant found nearby.');
+  }
+
+  let harvested = 0;
+  let replanted = 0;
+  for (const position of positions.slice(0, 6)) {
+    const block = bot.blockAt(position);
+    if (!block) continue;
+
+    let digBlock = block;
+    if (TALL_PLANT_NAMES.includes(block.name)) {
+      const below = bot.blockAt(block.position.offset(0, -1, 0));
+      if (below?.name !== block.name) {
+        continue;
+      }
+    }
+
+    await goNearBlock(digBlock, 2, 'farming');
+    if (!bot.canDigBlock(digBlock)) continue;
+    await bot.dig(digBlock);
+    harvested += 1;
+    await wait(350);
+
+    const crop = CROP_RULES[block.name];
+    const farmland = crop ? bot.blockAt(block.position.offset(0, -1, 0)) : null;
+    const seed = crop ? inventoryItemByNames([crop.seed]) : null;
+    if (crop && farmland?.name === 'farmland' && seed && Vec3) {
+      try {
+        await bot.equip(seed, 'hand');
+        await bot.placeBlock(farmland, new Vec3(0, 1, 0));
+        replanted += 1;
+      } catch (error) {
+        log(`Could not replant ${block.name}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  await collectNearbyDrops(8, 8);
+  publishInventory();
+  if (!harvested) {
+    throw new Error('Harvestable crops were nearby, but none could be reached or dug safely.');
+  }
+  return `Harvested ${harvested} crop or plant block${harvested === 1 ? '' : 's'}${replanted ? ` and replanted ${replanted}` : ''}.`;
+}
+
+async function breedNearbyAnimals() {
+  for (const rule of BREEDING_RULES) {
+    const food = inventoryItemByNames(rule.foods);
+    if (!food) continue;
+    const wanted = new Set(rule.mobs);
+    const animals = Object.values(bot.entities)
+      .filter((entity) => entity && entity !== bot.entity && entity.position && wanted.has(entityDisplayName(entity)) && (distanceToBot(entity) ?? 9999) <= 12)
+      .map((entity) => ({ entity, distance: distanceToBot(entity) ?? 9999 }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, 2)
+      .map(({ entity }) => entity);
+    if (animals.length < 2) continue;
+
+    pathState = {
+      status: 'breeding',
+      target: { type: 'entity', name: animals[0].name, position: vecToPlain(animals[0].position), distance: Number(distanceToBot(animals[0])?.toFixed(2)) },
+      updatedAt: now()
+    };
+    publishStatus();
+    await bot.equip(food, 'hand');
+    for (const animal of animals) {
+      await bot.pathfinder.goto(new goals.GoalNear(animal.position.x, animal.position.y, animal.position.z, 2));
+      await bot.activateEntity(animal);
+      await wait(350);
+    }
+    publishInventory();
+    return `Fed 2 nearby ${animals[0].name} with ${food.name} for breeding.`;
+  }
+
+  throw new Error('No breedable pair with matching food found nearby.');
+}
+
+async function huntPassiveMob() {
+  const mob = nearestEntityByNames(PASSIVE_FOOD_MOBS, 18);
+  if (!mob) {
+    throw new Error('No nearby passive food animal found.');
+  }
+  pathState = {
+    status: 'hunting',
+    target: { type: 'entity', name: mob.name, position: vecToPlain(mob.position), distance: Number(distanceToBot(mob)?.toFixed(2)) },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.pathfinder.goto(new goals.GoalNear(mob.position.x, mob.position.y, mob.position.z, 2));
+  await bot.attack(mob);
+  await wait(600);
+  await collectNearbyDrops(6, 6);
+  publishInventory();
+  return `Hunted nearby ${mob.name}.`;
+}
+
+async function fishOnce() {
+  const rod = inventoryItemByNames(['fishing_rod']);
+  if (!rod) {
+    throw new Error('No fishing rod in inventory.');
+  }
+  await bot.equip(rod, 'hand');
+  pathState = {
+    status: 'fishing',
+    target: { type: 'activity', name: 'fishing' },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.fish();
+  publishInventory();
+  return 'Caught one fishing result.';
+}
+
+async function placeTorchNearby() {
+  let torch = inventoryItemByNames(['torch']);
+  if (!torch) {
+    await craftItemByName('torch', 1);
+    torch = inventoryItemByNames(['torch']);
+    if (!torch) {
+      return 'Crafted torches, but none are available for placement yet.';
+    }
+  }
+  if (!Vec3) {
+    throw new Error('Cannot place torches because vec3 is unavailable.');
+  }
+
+  const positions = bot.findBlocks({
+    matching: (block) => Boolean(block && block.boundingBox !== 'empty' && !isUnsafeBlock(block)),
+    maxDistance: 10,
+    count: 40
+  });
+  const floorPosition = positions
+    .map((position) => bot.blockAt(position))
+    .find((block) => {
+      const above = block ? bot.blockAt(block.position.offset(0, 1, 0)) : null;
+      const light = typeof above?.light === 'number' ? above.light : 0;
+      return block && isOpenBlock(above) && light < 9;
+    })?.position;
+
+  if (!floorPosition) {
+    throw new Error('No safe dark floor found nearby for torch placement.');
+  }
+
+  const floor = bot.blockAt(floorPosition);
+  await goNearBlock(floor, 2, 'placing');
+  await bot.equip(torch, 'hand');
+  await bot.placeBlock(floor, new Vec3(0, 1, 0));
+  publishInventory();
+  return `Placed a torch near ${botPositionText()}.`;
+}
+
+async function inspectNearestContainer() {
+  const container = findNearestBlockByNames(['chest', 'trapped_chest', 'barrel'], 8, bot.entity.position);
+  if (!container) {
+    throw new Error('No chest, trapped chest, or barrel found nearby.');
+  }
+  await goNearBlock(container, 2, 'inspecting_container');
+  const opened = await bot.openContainer(container);
+  const items = opened.containerItems().map((item) => `${item.name}x${item.count}`).slice(0, 12);
+  opened.close();
+  return `Nearby ${container.name} contains: ${items.join(', ') || 'empty'}.`;
+}
+
+async function inspectNearestVillagerTrades() {
+  const villagerEntity = nearestEntityByNames(VILLAGER_NAMES, 12);
+  if (!villagerEntity) {
+    throw new Error('No villager or wandering trader found nearby.');
+  }
+  pathState = {
+    status: 'trading',
+    target: { type: 'entity', name: villagerEntity.name, position: vecToPlain(villagerEntity.position), distance: Number(distanceToBot(villagerEntity)?.toFixed(2)) },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.pathfinder.goto(new goals.GoalNear(villagerEntity.position.x, villagerEntity.position.y, villagerEntity.position.z, 2));
+  const villager = await bot.openVillager(villagerEntity);
+  const trades = (villager.trades || [])
+    .filter((trade) => !trade.tradeDisabled)
+    .slice(0, 6)
+    .map((trade, index) => {
+      const inputs = [trade.inputItem1, trade.inputItem2].filter((item) => item && item.type).map((item) => `${item.name || item.displayName || item.type}x${item.count || item.realPrice || 1}`);
+      const output = trade.outputItem ? `${trade.outputItem.name || trade.outputItem.displayName || trade.outputItem.type}x${trade.outputItem.count || 1}` : 'unknown';
+      return `#${index}: ${inputs.join(' + ')} -> ${output}`;
+    });
+  villager.close();
+  return `Nearby villager trades: ${trades.join('; ') || 'no usable trades visible'}.`;
 }
 
 async function sleepInBed() {

@@ -48,11 +48,45 @@ const MINECRAFT_FREE_PLAY_RE =
 const MINECRAFT_TASK_SIGNAL_RE =
   /帮我|替我|让(?:她|你|ai|AI|猫猫)?|叫(?:她|你)|去|开始|继续|执行|挖|采|砍|收集|探索|跑|跟着|跟随|攻击|打|回家|睡觉|吃|找|制作|合成|整理|走|往|躲|避开|杀|防御|保护|掩护|等待|等我|守住|别挡|让开|保持距离|分工|分头|箱子|共享|带路|种|钓|交易|装备|熔炼|烧|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come|guard|protect|cover|chest|storage|container|deposit/i;
 
+const MINECRAFT_PLAYER_ACTION_RE =
+  /(?:\u5e2e\u6211|\u66ff\u6211|\u8ba9\u5979|\u8ba9\u4f60|\u53bb|\u5f00\u59cb|\u7ee7\u7eed|\u6267\u884c|\u6316|\u780d|\u6536\u96c6|\u63a2\u7d22|\u8ddf|\u8ddf\u7740|\u8ddf\u968f|\u653b\u51fb|\u56de\u5bb6|\u7761\u89c9|\u5408\u6210|\u5236\u4f5c|\u6574\u7406|\u8d70|\u907f\u5f00|\u6740|\u9632\u5b88|\u4fdd\u62a4|\u7b49\u5f85|\u7b49\u6211|\u522b\u6321|\u8ba9\u5f00|\u5206\u5de5|\u7bb1\u5b50|\u5171\u4eab|\u5e26\u8def|\u79cd\u5730|\u6536\u83dc|\u9493\u9c7c|\u6253\u730e|\u4ea4\u6613|\u7e41\u6b96|\u5582\u52a8\u7269|\u706b\u628a|\u7167\u660e|\u7ea2\u77f3|\u9644\u9b54|\u836f\u6c34|\u4e0b\u754c|\u672b\u5730|\u9a6f\u670d|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come|guard|protect|cover|chest|storage|container|deposit|farm|harvest|fish|hunt|trade|breed|torch|redstone|enchant|potion|nether|end|tame)/i;
+
 const MINECRAFT_TASK_PRESETS: Array<[RegExp, string]> = [
   [
     MINECRAFT_FREE_PLAY_RE,
     'free play autonomously like a normal Minecraft player near the user: make a few safe choices, avoid blocking the user, react to danger, gather useful resources if sensible, otherwise explore nearby'
   ],
+  [/(?:\u7b2c\u4e00\u5929|\u5f00\u5c40|\u751f\u5b58\u8d77\u6b65|\u751f\u5b58\u51c6\u5907|\u57fa\u7840\u53d1\u80b2|\u5148\u53d1\u80b2|first day|survival basics|survival prep|starter supplies)/i, 'survival prep: gather wood, craft basic supplies if possible, get stone or coal if nearby, eat or find food if needed, then stop safely'],
+  [/(?:\u79cd\u5730|\u6536\u83dc|\u519c\u573a|\u5c0f\u9ea6|\u80e1\u841d\u535c|\u571f\u8c46|\u751c\u83dc|\u7518\u8517|\u7af9\u5b50|\u4ed9\u4eba\u638c|\u5357\u74dc|\u897f\u74dc|farm|crop|harvest|replant|sugar cane|bamboo|cactus|pumpkin|melon)/i, 'harvest mature nearby crops or plants, replant if possible, collect drops, and report what changed'],
+  [/(?:\u5582\u52a8\u7269|\u7e41\u6b96|\u517b\u725b|\u517b\u7f8a|\u517b\u732a|\u517b\u9e21|\u52a8\u7269\u519c\u573a|breed|breeding|feed animals|animal farm)/i, 'breed nearby farm animals if a matching food item and a safe pair are available'],
+  [/(?:\u9493\u9c7c|\u9c7c\u7aff|fish|fishing)/i, 'fish once with an available fishing rod, then report the catch or blocker'],
+  [/(?:\u6253\u730e|\u627e\u98df\u7269|\u6536\u96c6\u98df\u7269|\u6740\u725b|\u6740\u732a|\u6740\u9e21|\u6740\u7f8a|\u8089|hunt|find food|collect food|meat|cow|pig|chicken|sheep|rabbit)/i, 'collect safe food nearby: eat from inventory if needed, otherwise hunt one nearby passive food animal if safe'],
+  [/(?:\u6751\u6c11|\u4ea4\u6613|\u6d41\u6d6a\u5546\u4eba|villager|trade|trading|wandering trader)/i, 'inspect nearby villager or wandering trader trades and report the usable offers; do not buy unless a later tool supports exact trade execution'],
+  [/(?:\u63d2\u706b\u628a|\u653e\u706b\u628a|\u7167\u660e|\u70b9\u4eae|\u9ed1\u7684\u5730\u65b9|torch|light up|lighting|dark area)/i, 'craft or use torches if possible, place one in a nearby safe dark area, then report the result'],
+  [/(?:\u7bb1\u5b50|\u6728\u6876|\u5bb9\u5668|\u4ed3\u5e93|\u50a8\u7269|chest|barrel|container|storage)/i, 'inspect the nearest visible chest, barrel, or storage container and report its contents without taking items'],
+  [/(?:\u6316\u77ff|\u91c7\u77ff|\u4e0b\u77ff|\u77ff\u6d1e|\u627e\u77ff|\u77ff\u7269|mine|mining|ore|cave)/i, 'mine the nearest useful safe resource: prioritize requested ore if named, otherwise diamond, iron, coal, copper, redstone, gold, lapis, emerald, quartz, ancient debris, then stone'],
+  [/(?:\u94bb\u77f3|diamond)/i, 'mine nearby diamond ore safely if visible and reachable'],
+  [/(?:\u94c1\u77ff|\u627e\u94c1|iron)/i, 'mine nearby iron ore safely if visible and reachable'],
+  [/(?:\u7164|\u7164\u70ad|coal)/i, 'mine nearby coal ore safely if visible and reachable'],
+  [/(?:\u91d1\u77ff|\u91d1\u5b50|gold)/i, 'mine nearby gold ore safely if visible and reachable'],
+  [/(?:\u7ea2\u77f3|redstone)/i, 'mine nearby redstone ore safely if visible and reachable'],
+  [/(?:\u9752\u91d1\u77f3|lapis)/i, 'mine nearby lapis ore safely if visible and reachable'],
+  [/(?:\u7eff\u5b9d\u77f3|emerald)/i, 'mine nearby emerald ore safely if visible and reachable'],
+  [/(?:\u94dc\u77ff|\u94dc|copper)/i, 'mine nearby copper ore safely if visible and reachable'],
+  [/(?:\u77f3\u5934|\u5706\u77f3|stone|cobblestone)/i, 'collect nearby stone or cobblestone safely'],
+  [/(?:\u6c99\u5b50|sand)/i, 'collect nearby sand safely'],
+  [/(?:\u6ce5\u571f|\u571f\u5757|dirt)/i, 'collect nearby dirt safely'],
+  [/(?:\u7802\u783e|gravel)/i, 'collect nearby gravel safely'],
+  [/(?:\u9ed1\u66dc\u77f3|obsidian)/i, 'collect nearby obsidian safely if the tool and path allow it'],
+  [/(?:\u5408\u6210|\u5236\u4f5c|\u5de5\u4f5c\u53f0|\u7194\u7089|\u7bb1\u5b50|\u6728\u68cd|\u6728\u677f|\u5de5\u5177|\u9550|\u65a7|\u5251|\u94f2|craft|make|workbench|crafting table|furnace|plank|stick|tool|pickaxe|axe|sword|shovel)/i, 'craft the requested simple item if materials and a crafting table are available'],
+  [/(?:\u70e7\u77ff|\u7194\u70bc|\u70e7\u5236|smelt|smelting|cook ore)/i, 'smelt the requested item only if furnace, fuel, and input are available; otherwise explain the missing layer'],
+  [/(?:\u7ea2\u77f3\u673a\u5668|\u81ea\u52a8\u519c\u573a|\u6d3b\u585e|\u6f0f\u6597|redstone|piston|hopper|automation|auto farm|machine)/i, 'redstone automation: explain the exact missing blueprint/material/location requirements instead of pretending it is built'],
+  [/(?:\u9644\u9b54|\u94c1\u7827|\u7ecf\u9a8c|enchant|enchantment|anvil|xp farm)/i, 'enchanting task: explain the missing table/anvil/lapis/XP/item requirements or gather supplies if requested'],
+  [/(?:\u836f\u6c34|\u917f\u9020|\u70bc\u836f|potion|brew|brewing)/i, 'brewing task: explain missing brewing stand, bottles, blaze powder, nether wart, and target recipe requirements'],
+  [/(?:\u4e0b\u754c|\u5730\u72f1\u95e8|\u5821\u5792|\u70c8\u7130\u4eba|nether|portal|fortress|blaze)/i, 'nether task: explain portal and danger-navigation requirements; prepare supplies first if possible'],
+  [/(?:\u672b\u5730|\u672b\u5f71\u9f99|\u8981\u585e|\u672b\u5730\u57ce|\u9798\u7fc5|end dragon|ender dragon|stronghold|end portal|end city|elytra)/i, 'end-game task: explain the multi-step gear, eyes of ender, stronghold, dragon fight, and recovery plan requirements'],
+  [/(?:\u51cb\u7075|\u4fe1\u6807|wither|beacon)/i, 'wither or beacon task: explain the arena, gear, soul sand, skull, and safety requirements'],
+  [/(?:\u9a6f\u670d|\u9a6c|\u72fc|\u732b|\u5ba0\u7269|tame|horse|wolf|cat|pet)/i, 'taming task: find the target animal if nearby, but report that reliable repeated taming is not wired yet'],
   [/(?:\u780d.*\u6811|\u6811.*\u780d|\u8fd9\u68f5\u6811|\u90a3\u68f5\u6811|\u4f10\u6728|\u6728\u5934|\u539f\u6728|wood|tree)/i, 'collect wood by chopping nearby trees, then stop somewhere safe'],
   [/(?:\u7761.*\u5e8a|\u5e8a.*\u7761|\u8eba.*\u5e8a|\u4e0a\u5e8a|\u8fd9\u5f20\u5e8a|night|sleep|bed)/i, 'sleep in a bed if it is night and a bed is available'],
   [/(别挡|挡路|让开|站旁边|离我远|保持距离|不要挡|别堵|keep distance|don't block|dont block|move aside|out of my way)/i, 'move to the side of the player, keep a respectful 4 block distance, and do not block the player view or path'],
@@ -454,7 +488,11 @@ export function getMinecraftPluginTextIntent(text: string, gameCompanionEnabled:
     }
   }
 
-  const hasTaskSignal = MINECRAFT_FREE_PLAY_RE.test(cleanText) || MINECRAFT_TASK_SIGNAL_RE.test(cleanText) || MINECRAFT_STOP_TASK_RE.test(cleanText);
+  const hasTaskSignal =
+    MINECRAFT_FREE_PLAY_RE.test(cleanText) ||
+    MINECRAFT_PLAYER_ACTION_RE.test(cleanText) ||
+    MINECRAFT_TASK_SIGNAL_RE.test(cleanText) ||
+    MINECRAFT_STOP_TASK_RE.test(cleanText);
   if (!hasTaskSignal && !mentionsMinecraft) {
     return null;
   }

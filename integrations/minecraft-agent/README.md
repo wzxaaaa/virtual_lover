@@ -47,6 +47,8 @@ If no player entity or owner entity id is available, `follow me` starts a conser
 
 Resource tasks such as chopping trees work in Minecraft 1.15.1. If the bot is in creative mode, blocks can be dug but no item drops are created; switch the bot/world to survival when you want inventory collection.
 
+The desktop app can route natural chat into the agent while the Minecraft companion is enabled. For example, "follow me", "chop this tree", "go fish", "harvest crops", "check that villager", "place a torch", or "play by yourself like a normal player" become concrete `task` frames instead of just roleplay text.
+
 ## Accounts
 
 For LAN/offline testing, `auth: "offline"` and `username: "VirtualLoverBot"` are enough when your server accepts offline players.
@@ -93,10 +95,21 @@ This starter intentionally keeps the physical layer conservative:
 - query inventory
 - send in-game chat
 - mine a few nearby logs or common ores
+- mine requested nearby resource categories: wood, coal, iron, copper, gold, redstone, lapis, emerald, diamond, quartz, ancient debris, stone, dirt, sand, gravel, clay, obsidian, netherrack, basalt
+- generic mining: if no specific ore is requested, choose a useful visible nearby resource with diamond/iron/coal style priority, then fall back to stone
+- first-day survival prep: gather wood, craft simple basics when materials allow it, collect stone/coal if nearby, eat or find food when needed
 - sleep in a nearby bed when Minecraft allows sleeping
 - attack nearby hostile mobs
 - eat held/available food
-- free-play as a normal nearby player: react to danger, eat if needed, regroup if far away, gather sensible resources in survival, or explore in creative
+- harvest mature crops/plants and replant wheat, carrots, potatoes, and beetroots when seeds/items are available
+- hunt one nearby passive food animal when safe
+- breed nearby farm animals when a matching food item and pair are visible
+- fish once when a fishing rod is available
+- craft simple items from available recipes, including crafting table, furnace, chest, torches, planks/sticks, basic tools, boat, bed, shield, bowl, and bucket
+- place a torch on a safe nearby dark floor when torches can be crafted or are already held
+- inspect the nearest visible chest/barrel without taking items
+- inspect nearby villager or wandering trader offers without buying
+- free-play as a normal nearby player: react to danger, collect drops, eat if needed, regroup if far away, farm, hunt, gather sensible resources in survival, place light, inspect villagers, or explore
 - go near a named or nearest player
 
-Long-term planning, screenshots, container locking, precise building, and robust crafting are still future layers. The desktop app already sends enough protocol metadata for those to be added without changing the bridge.
+The agent now returns explicit blockers for tasks that need a deeper planner instead of pretending they are done: redstone automation, large builds, smelting workflows, enchanting, brewing, taming, Nether/End progression, wither/beacon goals, and elytra/end-city plans. The desktop app already sends enough protocol metadata for those layers to be added without changing the bridge.
