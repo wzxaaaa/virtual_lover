@@ -191,8 +191,9 @@
 - `P17` 已补第六段任务回包安全路由：按 `github_girl` `game_agent_minecraft` 插件测试里的 task_id 规则，主进程保留最近 32 个已下发任务，见过 task_id 回显后启用现代协议保护；未知 task_id 的 `task_finished` 只记日志和状态，不会完成当前 pending，也不会污染背包；历史 task_id 的迟到完成会作为回顾事件发出，不打断当前任务；无 task_id 的旧式完成包只在还没见过现代回显前走 FIFO 兜底，stop/reconnect 会重置 latch。这样 Minecraft Agent 后续多任务、迟到包、重复包更接近 `github_girl` 的行为。
 - `P17` 已补第七段 bot 视角入模：对齐 `github_girl` `service.py` 中“agent screenshot 进入 LLM 视觉上下文 + completion cue 触发继续判断”的语义，在本项目新增 `AgentTurnRequest.minecraftStatus`，LLM 会把 mc-agent 最新截图作为“她在 Minecraft 里的身体视角”附到多模态消息，同时带入连接、当前任务、最近日志和背包。普通对话、游戏陪玩周期 nudge、任务完成后都会携带该上下文；任务完成后除了固定提示，还会追加一轮 completion nudge，让模型基于最新 bot 画面判断是否补一句观察或继续明确下一步。适配点：当前项目没有 `github_girl` 的 push_message/message-plane，因此用 Electron renderer 主动发起 `agentTurn` 承接同等时机。
 - `P17` 已补第八段受阻/危险语义：照抄 `github_girl` `_format_completion_cue` 的 blocked marker 思路，将 mc-agent `status=ok` 但反馈包含 `not found`、`unavailable`、`please provide`、`no path`、`blocked` 等文本的完成包改判为 `blocked`，前端不再说“做完了”，而是提示目标/路径/坐标可能需要换思路。`alert` 帧也从普通日志升级为高优先级 Minecraft 事件，携带 severity/cause，renderer 会立即播报危险并触发一轮带 bot 视角的补判断。适配点：当前项目没有 `github_girl` push_message priority/coalesce 队列，所以用现有消息队列和 `requestGameCompanionNudge(cue)` 承接。
+- `P17` 已补第九段截图预算：按 `github_girl` `service.py` / `plugin.toml` 的 `screenshot_max_edge_px=1024`、`screenshot_jpeg_quality=80`、`screenshot_max_bytes=102400` 思路，主进程收到 mc-agent 截图后会用 Electron `nativeImage` 压成 JPEG，按 1024/512/256 最长边和 80/65/50/40/30 质量阶梯尝试，尽量把单帧控制在 100KB 内再进入 bot 视角缓存和 LLM 多模态上下文；失败时保留原图，不丢掉视觉信息。适配点：`github_girl` 用 Pillow，本项目用 Electron 原生图像能力，避免新增依赖。
 
-当前进度估算：整体迁移约 60%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 95%，完整游戏 Agent 自主玩法约 62%。
+当前进度估算：整体迁移约 61%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 96%，完整游戏 Agent 自主玩法约 63%。
 
 ## 文件域审阅摘要
 

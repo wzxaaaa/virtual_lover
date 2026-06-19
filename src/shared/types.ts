@@ -290,6 +290,11 @@ export interface MinecraftAgentScreenshot {
   dataUrl: string;
   mimeType: string;
   capturedAt: number;
+  byteLength?: number;
+  imageSize?: {
+    width: number;
+    height: number;
+  };
 }
 
 export interface MinecraftAgentAlert {

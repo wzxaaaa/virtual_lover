@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { nativeImage } from 'electron';
 import type {
   AppConfig,
   MinecraftAgentEvent,
@@ -31,6 +32,9 @@ const RECONNECT_INTERVAL_MS = 5000;
 const LOG_CACHE_LIMIT = 200;
 const SCREENSHOT_CACHE_LIMIT = 3;
 const DISPATCH_HISTORY_LIMIT = 32;
+const SCREENSHOT_MAX_EDGE_PX = 1024;
+const SCREENSHOT_MAX_BYTES = 100 * 1024;
+const SCREENSHOT_JPEG_QUALITIES = [80, 65, 50, 40, 30] as const;
 const BLOCKED_TASK_FEEDBACK_MARKERS = [
   'obstacle',
   'obstructed',
@@ -98,6 +102,86 @@ function normalizeInventory(value: unknown): Record<string, number> | null {
   return output;
 }
 
+function dataUrlForBytes(mimeType: string, bytes: Buffer): string {
+  return `data:${mimeType};base64,${bytes.toString('base64')}`;
+}
+
+function dataUrlFromFramePayload(payload: string, mimeType: string): string {
+  return payload.startsWith('data:') ? payload : `data:${mimeType};base64,${payload}`;
+}
+
+function mimeTypeFromDataUrl(dataUrl: string, fallback: string): string {
+  const match = /^data:([^;,]+)[;,]/i.exec(dataUrl);
+  return match?.[1] || fallback;
+}
+
+function compressScreenshotDataUrl(dataUrl: string, sourceMimeType: string): Omit<MinecraftAgentScreenshot, 'capturedAt'> {
+  try {
+    const image = nativeImage.createFromDataURL(dataUrl);
+    if (image.isEmpty()) {
+      return {
+        dataUrl,
+        mimeType: sourceMimeType
+      };
+    }
+
+    const sourceSize = image.getSize();
+    const edges = [SCREENSHOT_MAX_EDGE_PX, Math.floor(SCREENSHOT_MAX_EDGE_PX / 2), Math.floor(SCREENSHOT_MAX_EDGE_PX / 4)].filter(
+      (edge, index, list) => edge > 0 && list.indexOf(edge) === index
+    );
+    let smallest: { bytes: Buffer; size: { width: number; height: number } } | null = null;
+
+    for (const edge of edges) {
+      const sourceEdge = Math.max(sourceSize.width, sourceSize.height, 1);
+      const ratio = Math.min(edge / sourceEdge, 1);
+      const targetSize = {
+        width: Math.max(1, Math.round(sourceSize.width * ratio)),
+        height: Math.max(1, Math.round(sourceSize.height * ratio))
+      };
+      const frame =
+        targetSize.width === sourceSize.width && targetSize.height === sourceSize.height
+          ? image
+          : image.resize({
+              width: targetSize.width,
+              height: targetSize.height,
+              quality: 'best'
+            });
+      const frameSize = frame.getSize();
+
+      for (const quality of SCREENSHOT_JPEG_QUALITIES) {
+        const bytes = frame.toJPEG(quality);
+        if (!smallest || bytes.length < smallest.bytes.length) {
+          smallest = { bytes, size: frameSize };
+        }
+        if (bytes.length <= SCREENSHOT_MAX_BYTES) {
+          return {
+            dataUrl: dataUrlForBytes('image/jpeg', bytes),
+            mimeType: 'image/jpeg',
+            byteLength: bytes.length,
+            imageSize: frameSize
+          };
+        }
+      }
+    }
+
+    if (smallest) {
+      return {
+        dataUrl: dataUrlForBytes('image/jpeg', smallest.bytes),
+        mimeType: 'image/jpeg',
+        byteLength: smallest.bytes.length,
+        imageSize: smallest.size
+      };
+    }
+  } catch {
+    // Fall back to the original frame. Oversized screenshots are still more useful than dropping the visual context.
+  }
+
+  return {
+    dataUrl,
+    mimeType: mimeTypeFromDataUrl(dataUrl, sourceMimeType)
+  };
+}
+
 function screenshotFromFrame(frame: Record<string, unknown>): MinecraftAgentScreenshot | null {
   const payload = stringOrEmpty(frame.image) || stringOrEmpty(frame.data);
   if (!payload) {
@@ -106,9 +190,10 @@ function screenshotFromFrame(frame: Record<string, unknown>): MinecraftAgentScre
 
   const encoding = stringOrEmpty(frame.encoding).toLowerCase();
   const mimeType = encoding === 'jpg' || encoding === 'jpeg' ? 'image/jpeg' : 'image/png';
+  const dataUrl = dataUrlFromFramePayload(payload, mimeType);
+  const normalized = compressScreenshotDataUrl(dataUrl, mimeType);
   return {
-    dataUrl: payload.startsWith('data:') ? payload : `data:${mimeType};base64,${payload}`,
-    mimeType,
+    ...normalized,
     capturedAt: Date.now()
   };
 }
