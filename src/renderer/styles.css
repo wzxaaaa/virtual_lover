@@ -2181,6 +2181,55 @@ body.neko-model-dragging .pet-floating-toolbar * {
   white-space: nowrap;
 }
 
+.minecraft-agent-issues {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.minecraft-agent-issues article {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 7px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.minecraft-agent-issues article.is-error {
+  background: rgba(211, 57, 50, 0.1);
+}
+
+.minecraft-agent-issues article.is-warn {
+  background: rgba(223, 159, 73, 0.15);
+}
+
+.minecraft-agent-issues strong,
+.minecraft-agent-issues span,
+.minecraft-agent-issues small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minecraft-agent-issues strong {
+  color: #303946;
+  font-size: 12px;
+}
+
+.minecraft-agent-issues span {
+  color: #53606f;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.minecraft-agent-issues small {
+  color: #7d8794;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
 .minecraft-agent-log-panel {
   min-width: 0;
   max-height: 154px;
@@ -2313,6 +2362,23 @@ body.neko-model-dragging .pet-floating-toolbar * {
 
 .minecraft-agent-form-grid label {
   min-width: 0;
+}
+
+.minecraft-agent-lan-port {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
+.minecraft-agent-lan-port label {
+  min-width: 0;
+}
+
+.minecraft-agent-lan-port .minecraft-agent-button {
+  min-width: 122px;
+  flex: 0 0 auto;
 }
 
 .minecraft-agent-error,

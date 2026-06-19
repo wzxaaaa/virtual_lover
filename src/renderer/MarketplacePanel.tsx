@@ -86,7 +86,8 @@ const DEFAULT_STARTER_PROCESS_STATE: MinecraftAgentStarterProcessState = {
   exitCode: null,
   signal: null,
   lastError: null,
-  logs: []
+  logs: [],
+  issues: []
 };
 
 const MC_AGENT_DOWNLOAD_LINKS = [
@@ -160,6 +161,31 @@ function starterPatchFromForm(form: MinecraftAgentStarterConfigForm): MinecraftA
   };
 }
 
+function detectMinecraftLanPort(text: string): number | null {
+  const cleanText = String(text || '').trim();
+  if (!cleanText) {
+    return null;
+  }
+
+  const patterns = [
+    /local game hosted on port\s+(\d{2,5})/i,
+    /hosted on port\s+(\d{2,5})/i,
+    /端口(?:号)?\D{0,12}(\d{2,5})/i,
+    /port\D{0,12}(\d{2,5})/i,
+    /\b(\d{4,5})\b/
+  ];
+
+  for (const pattern of patterns) {
+    const match = cleanText.match(pattern);
+    const port = match ? Number(match[1]) : NaN;
+    if (Number.isInteger(port) && port >= 1 && port <= 65535) {
+      return port;
+    }
+  }
+
+  return null;
+}
+
 function MarketplaceStatusBadge({ item }: { item: MarketplaceItem }): ReactElement {
   return <span className={`marketplace-status is-${item.status}`}>{marketplaceStatusLabel(item.status)}</span>;
 }
@@ -211,6 +237,7 @@ function MinecraftAgentMarketplaceConfig({
   const [starterInfo, setStarterInfo] = useState<MinecraftAgentStarterInfo | null>(null);
   const [starterConfigForm, setStarterConfigForm] = useState<MinecraftAgentStarterConfigForm>(DEFAULT_STARTER_CONFIG_FORM);
   const [starterProcessState, setStarterProcessState] = useState<MinecraftAgentStarterProcessState>(DEFAULT_STARTER_PROCESS_STATE);
+  const [lanPortText, setLanPortText] = useState('');
   const [statusLoading, setStatusLoading] = useState(false);
   const [launchMessage, setLaunchMessage] = useState('');
 
@@ -357,6 +384,7 @@ function MinecraftAgentMarketplaceConfig({
       ? `内置 starter 运行中${starterProcessState.pid ? ` #${starterProcessState.pid}` : ''}`
       : '内置 starter 未运行';
   const starterProcessLogs = starterProcessState.logs.slice(-8).reverse();
+  const starterProcessIssues = starterProcessState.issues.slice(-4).reverse();
   const starterProcessBusy = starterProcessState.running || starterProcessState.installing;
 
   const updateStarterConfigForm = (patch: Partial<MinecraftAgentStarterConfigForm>): void => {
@@ -382,6 +410,18 @@ function MinecraftAgentMarketplaceConfig({
     } catch (error) {
       setLaunchMessage(error instanceof Error ? error.message : 'Minecraft Agent 本地配置保存失败。');
     }
+  };
+
+  const applyLanPortText = async (): Promise<void> => {
+    const port = detectMinecraftLanPort(lanPortText);
+    if (!port) {
+      setLaunchMessage('没有识别到 Minecraft LAN 端口。请粘贴类似 “Local game hosted on port 55916” 的聊天提示，或直接输入端口数字。');
+      return;
+    }
+
+    updateStarterConfigForm({ minecraftPort: port });
+    await saveStarterConfig({ minecraftPort: port });
+    setLaunchMessage(`已识别并保存 Minecraft LAN 端口：${port}`);
   };
 
   const openAdminPanel = (): void => {
@@ -511,6 +551,17 @@ function MinecraftAgentMarketplaceConfig({
             停止
           </button>
         </div>
+        {starterProcessIssues.length ? (
+          <div className="minecraft-agent-issues" aria-label="Minecraft Agent startup issues">
+            {starterProcessIssues.map((issue) => (
+              <article key={`${issue.code}-${issue.detectedAt}`} className={`is-${issue.level}`}>
+                <strong>{issue.title}</strong>
+                <span>{issue.action}</span>
+                <small>{issue.detail}</small>
+              </article>
+            ))}
+          </div>
+        ) : null}
         <div className="minecraft-agent-log-panel">
           <div>
             <Terminal size={14} />
@@ -622,6 +673,22 @@ function MinecraftAgentMarketplaceConfig({
             onChange={(event) => updateStarterConfigForm({ version: event.target.value })}
           />
         </label>
+      </div>
+
+      <div className="minecraft-agent-lan-port">
+        <label>
+          <span>LAN 端口提示</span>
+          <input
+            placeholder="Local game hosted on port 55916"
+            type="text"
+            value={lanPortText}
+            onChange={(event) => setLanPortText(event.target.value)}
+          />
+        </label>
+        <button className="minecraft-agent-button" type="button" onClick={() => void applyLanPortText()}>
+          <Settings2 size={15} />
+          识别并保存端口
+        </button>
       </div>
 
       <div className="minecraft-agent-actions">

@@ -166,7 +166,8 @@ function previewMinecraftStarterProcessState(): MinecraftAgentStarterProcessStat
     exitCode: null,
     signal: null,
     lastError: 'Browser preview cannot manage local Minecraft Agent processes.',
-    logs: []
+    logs: [],
+    issues: []
   };
 }
 

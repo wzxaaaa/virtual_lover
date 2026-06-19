@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import type {
   MinecraftAgentStarterProcessAction,
   MinecraftAgentStarterProcessEvent,
+  MinecraftAgentStarterIssue,
   MinecraftAgentStarterProcessLog,
   MinecraftAgentStarterProcessLogLevel,
   MinecraftAgentStarterProcessLogSource,
@@ -11,6 +12,7 @@ import type {
 } from '../shared/types';
 
 const MAX_LOGS = 160;
+const MAX_ISSUES = 8;
 const ERROR_PATTERNS =
   /error|failed|failure|cannot|can't|missing|not found|eaddrinuse|econnrefused|timed out|timeout|kicked|auth|denied|fatal/i;
 const WARN_PATTERNS = /warn|warning|offline|disconnect|ended|retry|reconnect/i;
@@ -32,7 +34,8 @@ function now(): number {
 function cloneState(state: MinecraftAgentStarterProcessState): MinecraftAgentStarterProcessState {
   return {
     ...state,
-    logs: state.logs.map((log) => ({ ...log }))
+    logs: state.logs.map((log) => ({ ...log })),
+    issues: state.issues.map((issue) => ({ ...issue }))
   };
 }
 
@@ -46,6 +49,71 @@ function logLevelFor(source: MinecraftAgentStarterProcessLogSource, text: string
   }
 
   return 'info';
+}
+
+function issueForLog(text: string): Omit<MinecraftAgentStarterIssue, 'detectedAt'> | null {
+  const lower = text.toLowerCase();
+  if (/eaddrinuse|address already in use|listen.*48909|port.*48909.*in use/i.test(text)) {
+    return {
+      code: 'bridge_port_in_use',
+      level: 'error',
+      title: 'Minecraft Agent bridge port is already in use.',
+      detail: text,
+      action: 'Stop the other mc-agent process, or change Bridge Port in the starter config and save it.'
+    };
+  }
+
+  if (/econnrefused|connection refused|failed to connect|connect.*127\.0\.0\.1|connect.*localhost|no route to host|timed out/i.test(text)) {
+    return {
+      code: 'minecraft_connection_refused',
+      level: 'error',
+      title: 'The bot cannot connect to the Minecraft LAN world.',
+      detail: text,
+      action: 'Open your Minecraft world to LAN, copy the displayed LAN port, save it in the starter config, then restart the starter.'
+    };
+  }
+
+  if (/unsupported protocol|version mismatch|outdated server|outdated client|unsupported version|this server is running/i.test(text)) {
+    return {
+      code: 'minecraft_version_mismatch',
+      level: 'error',
+      title: 'Minecraft version does not match.',
+      detail: text,
+      action: 'Set MC Version to the same Minecraft Java version as your world, or leave it blank and restart the starter.'
+    };
+  }
+
+  if (/auth|microsoft|invalid credentials|invalid session|login failed|not authenticated|yggdrasil/i.test(lower)) {
+    return {
+      code: 'minecraft_auth_failed',
+      level: 'error',
+      title: 'Minecraft account login failed.',
+      detail: text,
+      action: 'Use auth=offline only for offline/LAN servers that allow it; otherwise switch auth to microsoft and complete the login flow.'
+    };
+  }
+
+  if (/kicked|whitelist|banned|denied|not allowed/i.test(text)) {
+    return {
+      code: 'minecraft_kicked',
+      level: 'error',
+      title: 'The bot was kicked or rejected by the world.',
+      detail: text,
+      action: 'Check whitelist/offline-mode/account settings, then let the bot account join the same LAN world again.'
+    };
+  }
+
+  if (/cannot find module|module_not_found|missing dependencies|run npm install|no such file or directory/i.test(text)) {
+    return {
+      code: 'dependencies_missing',
+      level: 'error',
+      title: 'Minecraft Agent dependencies are missing.',
+      detail: text,
+      action: 'Click Install Dependencies in the Minecraft Agent market panel, wait for it to finish, then start again.'
+    };
+  }
+
+  return null;
 }
 
 class MinecraftAgentStarterProcessManager {
@@ -63,7 +131,8 @@ class MinecraftAgentStarterProcessManager {
     exitCode: null,
     signal: null,
     lastError: null,
-    logs: []
+    logs: [],
+    issues: []
   };
 
   onEvent(listener: (event: MinecraftAgentStarterProcessEvent) => void): () => void {
@@ -165,7 +234,8 @@ class MinecraftAgentStarterProcessManager {
       exitedAt: 0,
       exitCode: null,
       signal: null,
-      lastError: null
+      lastError: null,
+      issues: []
     });
     this.appendLog('system', `Started npm ${args.join(' ')} in ${rootDir}.`);
 
@@ -189,6 +259,16 @@ class MinecraftAgentStarterProcessManager {
 
       const message = code === 0 ? `npm ${args.join(' ')} exited normally.` : `npm ${args.join(' ')} exited with code ${code ?? 'unknown'}.`;
       this.appendLog('system', signal ? `${message} Signal: ${signal}.` : message, code === 0 ? 'info' : 'error');
+      if (code !== 0) {
+        this.appendIssue({
+          code: 'process_failed',
+          level: 'error',
+          title: `npm ${args.join(' ')} stopped unexpectedly.`,
+          detail: message,
+          action: 'Read the startup log above, fix the first reported error, then start the Minecraft Agent again.',
+          detectedAt: now()
+        });
+      }
       this.updateState({
         running: Boolean(this.agentProcess),
         installing: Boolean(this.installProcess),
@@ -220,12 +300,36 @@ class MinecraftAgentStarterProcessManager {
       text
     };
     const logs = [...this.state.logs, log].slice(-MAX_LOGS);
+    const issue = issueForLog(text);
     this.state = {
       ...this.state,
       logs,
       lastError: log.level === 'error' ? log.text : this.state.lastError
     };
+    if (issue) {
+      this.appendIssue({ ...issue, detectedAt: log.createdAt }, false);
+    }
     this.events.emit('event', { type: 'processLog', log: { ...log }, state: this.getState() } satisfies MinecraftAgentStarterProcessEvent);
+  }
+
+  private appendIssue(issue: MinecraftAgentStarterIssue, emit = true): void {
+    const existingIndex = this.state.issues.findIndex((item) => item.code === issue.code);
+    const nextIssues =
+      existingIndex >= 0
+        ? [
+            ...this.state.issues.slice(0, existingIndex),
+            issue,
+            ...this.state.issues.slice(existingIndex + 1)
+          ]
+        : [...this.state.issues, issue];
+    this.state = {
+      ...this.state,
+      issues: nextIssues.slice(-MAX_ISSUES),
+      lastError: issue.level === 'error' ? issue.title : this.state.lastError
+    };
+    if (emit) {
+      this.events.emit('event', { type: 'processState', state: this.getState() } satisfies MinecraftAgentStarterProcessEvent);
+    }
   }
 
   private updateState(patch: Partial<MinecraftAgentStarterProcessState>): void {

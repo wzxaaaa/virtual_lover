@@ -174,6 +174,23 @@ export type MinecraftAgentStarterConfigPatch = Partial<
 export type MinecraftAgentStarterProcessAction = 'install' | 'start' | 'stop';
 export type MinecraftAgentStarterProcessLogLevel = 'info' | 'warn' | 'error';
 export type MinecraftAgentStarterProcessLogSource = 'system' | 'stdout' | 'stderr';
+export type MinecraftAgentStarterIssueCode =
+  | 'bridge_port_in_use'
+  | 'minecraft_connection_refused'
+  | 'minecraft_version_mismatch'
+  | 'minecraft_auth_failed'
+  | 'minecraft_kicked'
+  | 'dependencies_missing'
+  | 'process_failed';
+
+export interface MinecraftAgentStarterIssue {
+  code: MinecraftAgentStarterIssueCode;
+  level: MinecraftAgentStarterDiagnosticLevel;
+  title: string;
+  detail: string;
+  action: string;
+  detectedAt: number;
+}
 
 export interface MinecraftAgentStarterProcessLog {
   id: string;
@@ -195,6 +212,7 @@ export interface MinecraftAgentStarterProcessState {
   signal: string | null;
   lastError: string | null;
   logs: MinecraftAgentStarterProcessLog[];
+  issues: MinecraftAgentStarterIssue[];
 }
 
 export type MinecraftAgentStarterProcessEvent =
