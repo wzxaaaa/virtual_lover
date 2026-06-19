@@ -347,6 +347,13 @@ export interface MinecraftAgentInventoryResponse {
   error?: string;
 }
 
+export interface MinecraftAgentNudge {
+  kind: 'in_progress' | 'keep_going';
+  cue: string;
+  createdAt: number;
+  priority: number;
+}
+
 export type MinecraftAgentEvent =
   | {
       type: 'status';
@@ -372,6 +379,10 @@ export type MinecraftAgentEvent =
       type: 'inventory';
       inventory: Record<string, number>;
       snapshotAt: number;
+    }
+  | {
+      type: 'nudge';
+      nudge: MinecraftAgentNudge;
     };
 
 export interface AppConfig {

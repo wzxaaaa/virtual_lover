@@ -2959,6 +2959,16 @@ export function App(): ReactElement {
         return;
       }
 
+      if (event.type === 'nudge') {
+        if (configRef.current.agent.gameCompanionGame === 'minecraft') {
+          setStatus(event.nudge.kind === 'in_progress' ? 'Minecraft 动作观察中' : 'Minecraft 空闲判断中');
+          window.setTimeout(() => {
+            requestGameCompanionNudge(event.nudge.cue).catch(() => undefined);
+          }, event.nudge.kind === 'in_progress' ? 120 : 300);
+        }
+        return;
+      }
+
       if (event.type === 'alert') {
         const cue = formatMinecraftAlertCue(event.alert);
         updateMessages((current) => [...current, createMessage('assistant', cue)]);
@@ -4090,8 +4100,8 @@ export function App(): ReactElement {
       const prompt = extraMinecraftCue
         ? [
             basePrompt,
-            `刚收到 Minecraft 动作反馈：${extraMinecraftCue}`,
-            '如果刚才已经向用户播报过完成，不要重复复述；只在有新观察、危险、资源变化、路线建议，或需要继续一个非常明确的下一步时回应。'
+            `Minecraft 游戏事件：${extraMinecraftCue}`,
+            '根据上面的事件判断是否回应：如果刚才已经向用户播报过完成，不要重复复述；只在有新观察、危险、资源变化、路线建议，或需要继续一个非常明确的下一步时回应。如果事件要求当前动作还在进行，就不要派新动作。'
           ].join('\n')
         : basePrompt;
 

@@ -35,6 +35,11 @@ const DISPATCH_HISTORY_LIMIT = 32;
 const SCREENSHOT_MAX_EDGE_PX = 1024;
 const SCREENSHOT_MAX_BYTES = 100 * 1024;
 const SCREENSHOT_JPEG_QUALITIES = [80, 65, 50, 40, 30] as const;
+const SYSTEM_LOOP_TICK_MS = 500;
+const IN_PROGRESS_NUDGE_AFTER_MS = 8000;
+const IN_PROGRESS_NUDGE_COOLDOWN_MS = 8000;
+const KEEP_GOING_NUDGE_AFTER_MS = 8000;
+const KEEP_GOING_NUDGE_COOLDOWN_MS = 10000;
 const BLOCKED_TASK_FEEDBACK_MARKERS = [
   'obstacle',
   'obstructed',
@@ -82,6 +87,47 @@ function inventorySummary(inventory: Record<string, number>, source: MinecraftAg
   }
 
   return `当前 Minecraft 背包：${items.map(([name, count]) => `${name}×${count}`).join('、')}`;
+}
+
+function inventoryCueLine(inventory: Record<string, number>, maxItems: number, emptyWhenKnown: boolean): string {
+  const items = Object.entries(inventory)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxItems)
+    .map(([name, count]) => `${name}×${count}`);
+
+  if (items.length > 0) {
+    return `背包：${items.join('、')}`;
+  }
+
+  return emptyWhenKnown ? '背包：空' : '';
+}
+
+function inProgressNudgeCue(taskText: string, elapsedMs: number, inventory: Record<string, number>): string {
+  const inventoryLine = inventoryCueLine(inventory, 15, false);
+  return [
+    '[你正在做事]',
+    `你正在做: "${taskText.slice(0, 120)}"（已经过了 ${Math.round(elapsedMs / 1000)} 秒）。`,
+    inventoryLine,
+    '有新内容（画面/反馈/感受换了角度）就说一句，没新内容就安静别说。不许复读之前的话，不许编尚未发生的结果，比如别说“快搞定了”“挖到一半了”。',
+    '当前动作还在进行，你现在只负责讲述当下看到/感受到的，不要派新任务，不要调用 Minecraft 动作工具，否则会打断正在做的事。',
+    '绝对不要把内部状态当对话播报给用户，“连接”“任务空闲”“系统”“minecraft_task”“工具”“tool”这些字眼一律不准说出口，只讲游戏里的事。'
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function keepGoingNudgeCue(inventory: Record<string, number>, lastInventoryAt: number): string {
+  const inventoryLine = inventoryCueLine(inventory, 20, lastInventoryAt > 0);
+  return [
+    '[你闲下来了]',
+    inventoryLine,
+    '你已经停下了。如果用户刚刚交代了要做什么，就顺着他的意思来，别自作主张派一个会盖掉他要求的新动作。',
+    '否则可以挑下一步：优先跟用户聊一句你想接着干啥/刚才做得怎么样；只有在确实有明显该做的事时，再派一个具体可执行的动作。别为了凑任务硬编一个，也别站着挂机。',
+    '绝对不要把内部状态当对话播报给用户，“连接”“任务空闲”“系统”“minecraft_task”“工具”“tool”这些字眼一律不准说出口。要派动作就直接调用动作工具但不要把工具名说出来，要说话就用第一人称讲游戏里的事。'
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function normalizeInventory(value: unknown): Record<string, number> | null {
@@ -264,12 +310,16 @@ class MinecraftAgentService {
   private connected = false;
   private socket: WebSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private systemLoopTimer: ReturnType<typeof setInterval> | null = null;
   private pendingTask: PendingTask | null = null;
   private logCache: string[] = [];
   private screenshotCache: MinecraftAgentScreenshot[] = [];
   private lastInventory: Record<string, number> = {};
   private lastInventoryAt = 0;
   private lastError: string | null = null;
+  private lastTaskFinishedAt = 0;
+  private lastInProgressNudgeAt = 0;
+  private lastKeepGoingNudgeAt = 0;
   private inventoryWaiters: InventoryWaiter[] = [];
   private dispatchedHistory = new Map<string, string>();
   private seenTaskIdEcho = false;
@@ -288,6 +338,7 @@ class MinecraftAgentService {
     }
 
     this.running = true;
+    this.ensureSystemLoop();
     this.openSocket();
   }
 
@@ -295,6 +346,7 @@ class MinecraftAgentService {
     this.running = false;
     this.connected = false;
     this.clearReconnectTimer();
+    this.clearSystemLoopTimer();
     this.resolvePending({
       ok: false,
       status: 'interrupted',
@@ -305,6 +357,9 @@ class MinecraftAgentService {
     this.resolveInventoryWaiters('none', 'Minecraft Agent 已停止。');
     this.dispatchedHistory.clear();
     this.seenTaskIdEcho = false;
+    this.lastTaskFinishedAt = 0;
+    this.lastInProgressNudgeAt = 0;
+    this.lastKeepGoingNudgeAt = 0;
 
     const socket = this.socket;
     this.socket = null;
@@ -391,6 +446,7 @@ class MinecraftAgentService {
       };
 
       this.pendingTask = pending;
+      this.lastTaskFinishedAt = 0;
       const sent = this.sendTaskFrame(taskText, taskId);
       if (!sent) {
         this.resolvePending({
@@ -401,6 +457,8 @@ class MinecraftAgentService {
           summary: '本地 Minecraft Agent 还没有连接。',
           error: 'WebSocket send failed.'
         });
+      } else {
+        this.emitStatus();
       }
     });
   }
@@ -453,6 +511,7 @@ class MinecraftAgentService {
     };
 
     this.pendingTask = pending;
+    this.lastTaskFinishedAt = 0;
     const sent = this.sendTaskFrame(taskText, taskId);
     if (!sent) {
       const result: MinecraftAgentTaskResult = {
@@ -605,6 +664,74 @@ class MinecraftAgentService {
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
+    }
+  }
+
+  private ensureSystemLoop(): void {
+    if (this.systemLoopTimer) {
+      return;
+    }
+
+    this.systemLoopTimer = setInterval(() => {
+      this.runSystemLoopTick();
+    }, SYSTEM_LOOP_TICK_MS);
+  }
+
+  private clearSystemLoopTimer(): void {
+    if (this.systemLoopTimer) {
+      clearInterval(this.systemLoopTimer);
+      this.systemLoopTimer = null;
+    }
+  }
+
+  private runSystemLoopTick(): void {
+    if (!this.running) {
+      return;
+    }
+
+    const now = Date.now();
+    const pending = this.pendingTask;
+    if (pending) {
+      const elapsed = now - pending.startedAt;
+      const sinceLast = now - this.lastInProgressNudgeAt;
+      if (elapsed >= IN_PROGRESS_NUDGE_AFTER_MS && sinceLast >= IN_PROGRESS_NUDGE_COOLDOWN_MS) {
+        this.events.emit(
+          'event',
+          {
+            type: 'nudge',
+            nudge: {
+              kind: 'in_progress',
+              cue: inProgressNudgeCue(pending.taskText, elapsed, this.lastInventory),
+              createdAt: now,
+              priority: 4
+            }
+          } satisfies MinecraftAgentEvent
+        );
+        this.lastInProgressNudgeAt = now;
+      }
+      return;
+    }
+
+    if (this.lastTaskFinishedAt <= 0) {
+      return;
+    }
+
+    const sinceFinish = now - this.lastTaskFinishedAt;
+    const sinceLastKeepGoing = now - this.lastKeepGoingNudgeAt;
+    if (sinceFinish >= KEEP_GOING_NUDGE_AFTER_MS && sinceLastKeepGoing >= KEEP_GOING_NUDGE_COOLDOWN_MS) {
+      this.events.emit(
+        'event',
+        {
+          type: 'nudge',
+          nudge: {
+            kind: 'keep_going',
+            cue: keepGoingNudgeCue(this.lastInventory, this.lastInventoryAt),
+            createdAt: now,
+            priority: 3
+          }
+        } satisfies MinecraftAgentEvent
+      );
+      this.lastKeepGoingNudgeAt = now;
     }
   }
 
@@ -800,6 +927,9 @@ class MinecraftAgentService {
       return;
     }
 
+    if (!this.pendingTask) {
+      this.lastTaskFinishedAt = Date.now();
+    }
     this.events.emit('event', { type: 'taskFinished', result } satisfies MinecraftAgentEvent);
     this.emitStatus();
   }
@@ -823,6 +953,7 @@ class MinecraftAgentService {
 
     clearTimeout(pending.timeout);
     this.pendingTask = null;
+    this.lastTaskFinishedAt = Date.now();
     const finalResult = {
       ...result,
       summary: result.summary || taskSummary(result)
