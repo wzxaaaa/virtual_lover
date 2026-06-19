@@ -96,6 +96,7 @@ This starter intentionally keeps the physical layer conservative:
 - sleep in a nearby bed when Minecraft allows sleeping
 - attack nearby hostile mobs
 - eat held/available food
+- free-play as a normal nearby player: react to danger, eat if needed, regroup if far away, gather sensible resources in survival, or explore in creative
 - go near a named or nearest player
 
 Long-term planning, screenshots, container locking, precise building, and robust crafting are still future layers. The desktop app already sends enough protocol metadata for those to be added without changing the bridge.

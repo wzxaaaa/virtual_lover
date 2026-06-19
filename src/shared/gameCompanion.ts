@@ -43,10 +43,16 @@ const MINECRAFT_STATUS_RE =
 const MINECRAFT_CHAT_RE =
   /(?:在|到)?(?:游戏|我的世界|minecraft|mc).*?(?:说|发|回复|喊|打字|chat)|(?:说|发|回复|喊|打字).*?(?:游戏|我的世界|minecraft|mc|聊天|chat)/i;
 const MINECRAFT_STOP_TASK_RE = /(?:停止|取消|中断|打断|停下|别做).*(?:任务|动作|操作|当前|挖|砍|找|走)|(?:先停|停一下|别动了|别动)/i;
+const MINECRAFT_FREE_PLAY_RE =
+  /(?:\u968f\u4fbf\u73a9|\u968f\u4fbf\u73a9\u73a9|\u968f\u4f60\u73a9|\u81ea\u5df1\u73a9|\u4f60\u81ea\u5df1\u73a9|\u81ea\u7531\u73a9|\u968f\u610f\u73a9|\u81ea\u7531\u6d3b\u52a8|\u50cf.*\u6b63\u5e38.*\u73a9\u5bb6|\u50cf.*\u73a9\u5bb6.*\u4e00\u6837|free play|play freely|play autonomously|do whatever|do your own thing)/i;
 const MINECRAFT_TASK_SIGNAL_RE =
   /帮我|替我|让(?:她|你|ai|AI|猫猫)?|叫(?:她|你)|去|开始|继续|执行|挖|采|砍|收集|探索|跑|跟着|跟随|攻击|打|回家|睡觉|吃|找|制作|合成|整理|走|往|躲|避开|杀|防御|保护|掩护|等待|等我|守住|别挡|让开|保持距离|分工|分头|箱子|共享|带路|种|钓|交易|装备|熔炼|烧|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come|guard|protect|cover|chest|storage|container|deposit/i;
 
 const MINECRAFT_TASK_PRESETS: Array<[RegExp, string]> = [
+  [
+    MINECRAFT_FREE_PLAY_RE,
+    'free play autonomously like a normal Minecraft player near the user: make a few safe choices, avoid blocking the user, react to danger, gather useful resources if sensible, otherwise explore nearby'
+  ],
   [/(?:\u780d.*\u6811|\u6811.*\u780d|\u8fd9\u68f5\u6811|\u90a3\u68f5\u6811|\u4f10\u6728|\u6728\u5934|\u539f\u6728|wood|tree)/i, 'collect wood by chopping nearby trees, then stop somewhere safe'],
   [/(?:\u7761.*\u5e8a|\u5e8a.*\u7761|\u8eba.*\u5e8a|\u4e0a\u5e8a|\u8fd9\u5f20\u5e8a|night|sleep|bed)/i, 'sleep in a bed if it is night and a bed is available'],
   [/(别挡|挡路|让开|站旁边|离我远|保持距离|不要挡|别堵|keep distance|don't block|dont block|move aside|out of my way)/i, 'move to the side of the player, keep a respectful 4 block distance, and do not block the player view or path'],
@@ -448,7 +454,7 @@ export function getMinecraftPluginTextIntent(text: string, gameCompanionEnabled:
     }
   }
 
-  const hasTaskSignal = MINECRAFT_TASK_SIGNAL_RE.test(cleanText) || MINECRAFT_STOP_TASK_RE.test(cleanText);
+  const hasTaskSignal = MINECRAFT_FREE_PLAY_RE.test(cleanText) || MINECRAFT_TASK_SIGNAL_RE.test(cleanText) || MINECRAFT_STOP_TASK_RE.test(cleanText);
   if (!hasTaskSignal && !mentionsMinecraft) {
     return null;
   }

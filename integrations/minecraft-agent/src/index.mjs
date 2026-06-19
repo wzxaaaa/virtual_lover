@@ -50,6 +50,7 @@ const HOSTILE_NAMES = new Set([
   'zombie_villager'
 ]);
 const FOOD_HINTS = ['bread', 'apple', 'beef', 'porkchop', 'chicken', 'mutton', 'cod', 'salmon', 'potato', 'carrot', 'stew', 'berries'];
+const WOOD_LOG_NAMES = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'];
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_CONFIG_PATH = path.join(ROOT, 'config.json');
@@ -910,13 +911,120 @@ async function collectNearbyDrops(maxDistance = 6, maxItems = 6) {
   return collected;
 }
 
+function isCreativeMode() {
+  return String(bot?.game?.gameMode || '').toLowerCase() === 'creative';
+}
+
+function isUnsafeBlock(block) {
+  return /lava|fire|cactus|magma|campfire/i.test(String(block?.name || ''));
+}
+
+function isOpenBlock(block) {
+  return !block || block.boundingBox === 'empty';
+}
+
+function isStandablePosition(position) {
+  if (!bot || !position) return false;
+  const feet = bot.blockAt(position);
+  const head = bot.blockAt(position.offset(0, 1, 0));
+  const floor = bot.blockAt(position.offset(0, -1, 0));
+  return Boolean(
+    floor &&
+      floor.boundingBox !== 'empty' &&
+      !isUnsafeBlock(floor) &&
+      isOpenBlock(feet) &&
+      isOpenBlock(head) &&
+      !isUnsafeBlock(feet) &&
+      !isUnsafeBlock(head)
+  );
+}
+
+function findStandablePositionNear(origin, radius = 10, preferredDirection = null) {
+  if (!bot?.entity || !origin) return null;
+  const center = origin.floored ? origin.floored() : bot.entity.position.floored();
+  const baseAngle = preferredDirection ? Math.atan2(preferredDirection.z, preferredDirection.x) : Math.random() * Math.PI * 2;
+
+  for (let attempt = 0; attempt < 18; attempt += 1) {
+    const jitter = preferredDirection ? (Math.random() - 0.5) * 0.9 : Math.random() * Math.PI * 2;
+    const angle = preferredDirection ? baseAngle + jitter : jitter;
+    const distance = Math.max(3, Math.min(radius, 3 + Math.random() * radius));
+    const candidateBase = center.offset(Math.round(Math.cos(angle) * distance), 0, Math.round(Math.sin(angle) * distance));
+
+    for (let dy = 2; dy >= -4; dy -= 1) {
+      const candidate = candidateBase.offset(0, dy, 0);
+      if (isStandablePosition(candidate)) {
+        return candidate.offset(0.5, 0, 0.5);
+      }
+    }
+  }
+
+  return null;
+}
+
+async function moveToPosition(position, status = 'exploring', label = 'nearby area') {
+  pathState = {
+    status,
+    target: {
+      type: 'position',
+      name: label,
+      position: vecToPlain(position),
+      distance: Number(bot.entity.position.distanceTo(position).toFixed(2))
+    },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.pathfinder.goto(new goals.GoalNear(position.x, position.y, position.z, 2));
+}
+
+async function wanderNearby(label = 'nearby area') {
+  const origin = ownerOrBotPosition() || bot.entity.position;
+  const destination = findStandablePositionNear(origin, 12) || findStandablePositionNear(bot.entity.position, 8);
+  if (!destination) {
+    throw new Error('No safe nearby place found to explore.');
+  }
+  await moveToPosition(destination, 'exploring', label);
+  await collectNearbyDrops(5, 4);
+  return `explored ${label} at ${botPositionText()}`;
+}
+
+async function retreatFromEntity(entity) {
+  const botPosition = bot.entity.position;
+  let dx = botPosition.x - entity.position.x;
+  let dz = botPosition.z - entity.position.z;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  if (length < 0.1) {
+    dx = Math.random() - 0.5;
+    dz = Math.random() - 0.5;
+  } else {
+    dx /= length;
+    dz /= length;
+  }
+
+  const destination = findStandablePositionNear(botPosition, 12, { x: dx, z: dz });
+  if (!destination) {
+    throw new Error(`No safe retreat path from ${entity.name || 'danger'} found.`);
+  }
+  await moveToPosition(destination, 'retreating', `retreat from ${entity.name || 'danger'}`);
+  return `backed away from ${entity.name || 'danger'}`;
+}
+
 function taskIncludes(text, words) {
   const lower = text.toLowerCase();
   return words.some((word) => lower.includes(word));
 }
 
+function hasFreePlayIntent(text) {
+  return taskIncludes(text, ['free play', 'play freely', 'play autonomously', 'normal minecraft player', 'do whatever', 'do your own thing']);
+}
+
 function hasPrimaryActionIntent(text) {
   return taskIncludes(text, [
+    'free play',
+    'play freely',
+    'play autonomously',
+    'normal minecraft player',
+    'do whatever',
+    'do your own thing',
     'follow',
     'stay near',
     'with me',
@@ -1151,6 +1259,7 @@ function cryptoRandomId() {
 
 async function executeTask(text) {
   const lower = text.toLowerCase();
+  const freePlayIntent = hasFreePlayIntent(lower);
   const followIntent = hasFollowIntent(lower);
   const sleepIntent = taskIncludes(lower, ['sleep', 'bed', 'night']);
 
@@ -1167,7 +1276,7 @@ async function executeTask(text) {
     await wakeIfSleeping();
   }
 
-  if (!followIntent) {
+  if (!freePlayIntent && !followIntent) {
     clearCommandFollow();
   }
 
@@ -1182,6 +1291,10 @@ async function executeTask(text) {
       await sendGameChat(message);
       return `Said: ${message}`;
     }
+  }
+
+  if (freePlayIntent) {
+    return playAutonomously();
   }
 
   if (taskIncludes(lower, ['eat', 'food', 'hungry'])) {
@@ -1205,7 +1318,7 @@ async function executeTask(text) {
   }
 
   if (taskIncludes(lower, ['wood', 'log', 'tree', 'oak'])) {
-    return digBlocks(['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'], 'wood');
+    return digBlocks(WOOD_LOG_NAMES, 'wood');
   }
 
   if (taskIncludes(lower, ['coal'])) {
@@ -1300,6 +1413,56 @@ async function goNearPlayer() {
   publishStatus();
   await bot.pathfinder.goto(new goals.GoalNear(pos.x, pos.y, pos.z, distance));
   return `Regrouped near ${target.name}.`;
+}
+
+async function playAutonomously() {
+  bot.pathfinder.setGoal(null);
+  bot.clearControlStates();
+  clearCommandFollow();
+
+  const actions = [];
+  const closeHostile = nearestHostile(6);
+  if (closeHostile) {
+    if (String(closeHostile.name || '').toLowerCase() === 'creeper' || bot.health <= 10) {
+      actions.push(await retreatFromEntity(closeHostile));
+      return `Free play: ${actions.join('; ')}.`;
+    }
+
+    try {
+      actions.push(await attackNearestHostile());
+      return `Free play: ${actions.join('; ')}.`;
+    } catch (error) {
+      log(`Autonomous fight skipped: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if ((bot.food < 14 || bot.health < 14) && bot.inventory.items().some((item) => FOOD_HINTS.some((hint) => item.name.includes(hint)))) {
+    actions.push(await eatFood());
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
+  const tracked = findOwnerOrNearestPlayer();
+  const trackedDistance = tracked?.player?.entity ? distanceToBot(tracked.player.entity) : null;
+  if (trackedDistance !== null && trackedDistance > Math.max(config.behavior.regroupDistance, 10)) {
+    actions.push(await goNearPlayer());
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
+  const woodIds = WOOD_LOG_NAMES.map((name) => mcData.blocksByName[name]?.id).filter(Boolean);
+  const nearbyWood = woodIds.length ? findKnownBlockNear(woodIds, ownerOrBotPosition(), Math.min(config.behavior.searchRadius, 18)) : null;
+  if (!isCreativeMode() && nearbyWood && inventoryCount(WOOD_LOG_NAMES) < 8) {
+    actions.push(await digBlocks(WOOD_LOG_NAMES, 'wood'));
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
+  const collectedDrops = await collectNearbyDrops(6, 6);
+  if (collectedDrops > 0) {
+    actions.push(`picked up ${collectedDrops} nearby drop${collectedDrops === 1 ? '' : 's'}`);
+    return `Free play: ${actions.join('; ')}.`;
+  }
+
+  actions.push(await wanderNearby(isCreativeMode() ? 'nearby creative area' : 'nearby survival area'));
+  return `Free play: ${actions.join('; ')}.`;
 }
 
 async function sleepInBed() {
