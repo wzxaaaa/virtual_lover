@@ -476,14 +476,21 @@ function MinecraftAgentMarketplaceConfig({
       ? `${agentStatus.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'} ${new Date(agentStatus.lastNudgeAt).toLocaleTimeString('zh-CN')}`
       : '暂无';
   const adminUrl = config.agent.minecraftAgentAdminUrl || MC_AGENT_ADMIN_DEFAULT_URL;
-  const starterProcessTone = starterProcessState.installing ? 'checking' : starterProcessState.running ? 'connected' : 'disconnected';
+  const starterBridgeIsConnected = Boolean(agentStatus?.connected);
+  const starterProcessTone =
+    starterProcessState.installing ? 'checking' : starterProcessState.running || starterBridgeIsConnected ? 'connected' : 'disconnected';
   const starterProcessLabel = starterProcessState.installing
     ? '正在安装依赖'
     : starterProcessState.running
       ? `内置 starter 运行中${starterProcessState.pid ? ` #${starterProcessState.pid}` : ''}`
       : '内置 starter 未运行';
+  const starterProcessDisplayLabel =
+    !starterProcessState.installing && !starterProcessState.running && starterBridgeIsConnected ? '已有 mc-agent 运行中' : starterProcessLabel;
   const starterProcessLogs = starterProcessState.logs.slice(-8).reverse();
-  const starterProcessIssues = starterProcessState.issues.slice(-4).reverse();
+  const starterProcessIssues = starterProcessState.issues
+    .filter((issue) => !(starterBridgeIsConnected && issue.code === 'bridge_port_in_use'))
+    .slice(-4)
+    .reverse();
   const starterProcessBusy = starterProcessState.running || starterProcessState.installing;
 
   const updateStarterConfigForm = (patch: Partial<MinecraftAgentStarterConfigForm>): void => {
@@ -691,7 +698,7 @@ function MinecraftAgentMarketplaceConfig({
 
       <div className="minecraft-agent-process">
         <div className="minecraft-agent-status-row">
-          <span className={`minecraft-agent-status-badge is-${starterProcessTone}`}>{starterProcessLabel}</span>
+          <span className={`minecraft-agent-status-badge is-${starterProcessTone}`}>{starterProcessDisplayLabel}</span>
           <span>{starterProcessState.command || 'npm start'}</span>
         </div>
         <div className="minecraft-agent-actions">
@@ -707,7 +714,7 @@ function MinecraftAgentMarketplaceConfig({
           <button
             className="minecraft-agent-button"
             type="button"
-            disabled={starterProcessBusy}
+            disabled={starterProcessBusy || starterBridgeIsConnected}
             onClick={() => void runStarterProcessAction('start')}
           >
             <Play size={15} />
