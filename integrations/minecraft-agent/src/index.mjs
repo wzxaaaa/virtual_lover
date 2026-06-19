@@ -75,6 +75,10 @@ function now() {
   return Date.now();
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function log(message) {
   const line = `[${new Date().toLocaleTimeString()}] ${message}`;
   console.log(line);
@@ -206,14 +210,45 @@ function playerState(name, player) {
   };
 }
 
+function entityPlayerName(entity) {
+  return String(entity?.username || entity?.profile?.name || entity?.displayName || entity?.name || '').trim();
+}
+
+function playerTargets() {
+  if (!bot) return [];
+  const targets = [];
+  const seen = new Set();
+
+  for (const [name, player] of Object.entries(bot.players)) {
+    if (name === bot.username) continue;
+    const key = name.toLowerCase();
+    seen.add(key);
+    targets.push({ name, player });
+  }
+
+  for (const entity of Object.values(bot.entities)) {
+    if (!entity || entity === bot.entity || entity.type !== 'player') continue;
+    const name = entityPlayerName(entity);
+    if (!name || name === bot.username) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      const existing = targets.find((target) => target.name.toLowerCase() === key);
+      if (existing && !existing.player?.entity) {
+        existing.player = { ...(existing.player || {}), entity };
+      }
+      continue;
+    }
+    seen.add(key);
+    targets.push({ name, player: { entity } });
+  }
+
+  return targets;
+}
+
 function resolvePlayerByName(name) {
   if (!bot || !name) return null;
-  const exact = bot.players[name];
-  if (exact) return { name, player: exact };
-
   const wanted = String(name).toLowerCase();
-  const entry = Object.entries(bot.players).find(([playerName]) => playerName.toLowerCase() === wanted);
-  return entry ? { name: entry[0], player: entry[1] } : null;
+  return playerTargets().find((target) => target.name.toLowerCase() === wanted) || null;
 }
 
 function findOwnerOrNearestPlayer() {
@@ -225,8 +260,8 @@ function findOwnerOrNearestPlayer() {
   }
 
   let best = null;
-  for (const [name, player] of Object.entries(bot.players)) {
-    if (name === bot.username || !player?.entity) continue;
+  for (const { name, player } of playerTargets()) {
+    if (!player?.entity) continue;
     const distance = distanceToBot(player.entity);
     if (distance === null) continue;
     if (!best || distance < best.distance) {
@@ -237,19 +272,16 @@ function findOwnerOrNearestPlayer() {
 }
 
 function knownPlayers() {
-  if (!bot) return [];
-  return Object.entries(bot.players)
-    .filter(([name]) => name !== bot.username)
-    .map(([name, player]) => playerState(name, player))
+  return playerTargets()
+    .map(({ name, player }) => playerState(name, player))
     .sort((a, b) => Number(b.visible) - Number(a.visible) || (a.distance ?? 9999) - (b.distance ?? 9999))
     .slice(0, 12);
 }
 
 function nearbyPlayers() {
-  if (!bot) return [];
-  return Object.entries(bot.players)
-    .filter(([name, player]) => name !== bot.username && player?.entity)
-    .map(([name, player]) => playerState(name, player))
+  return playerTargets()
+    .filter(({ player }) => player?.entity)
+    .map(({ name, player }) => playerState(name, player))
     .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
     .slice(0, 8);
 }
@@ -272,6 +304,21 @@ function playerTargetHelp(action) {
     ? `/tp ${bot?.username || config.minecraft.username} ${owner}`
     : `/tp ${bot?.username || config.minecraft.username} <your Minecraft name>`;
   return `Cannot ${action}: no visible owner/player target. ${ownerText} ${visibleText} ${knownText} Bot is at ${botPositionText()}. Move close to the bot, set Owner to your exact Minecraft name, or enable cheats and run "${tpHint}" in Minecraft chat.`;
+}
+
+async function tryTeleportToOwnerTarget() {
+  const owner = String(config.behavior.owner || '').trim();
+  if (!owner || !bot?.entity) {
+    return { owner, moved: false, target: null };
+  }
+
+  const resolvedOwner = resolvePlayerByName(owner)?.name || owner;
+  const before = bot.entity.position?.clone?.();
+  await sendGameChat(`/tp ${bot.username || config.minecraft.username} ${resolvedOwner}`);
+  await wait(900);
+  const target = findOwnerOrNearestPlayer();
+  const moved = Boolean(before && bot.entity?.position && bot.entity.position.distanceTo(before) > 1);
+  return { owner: resolvedOwner, moved, target };
 }
 
 function nearbyEntities() {
@@ -536,17 +583,59 @@ function taskIncludes(text, words) {
   return words.some((word) => lower.includes(word));
 }
 
+function hasPrimaryActionIntent(text) {
+  return taskIncludes(text, [
+    'follow',
+    'stay near',
+    'with me',
+    'keep up',
+    'come here',
+    'go to me',
+    'regroup',
+    'find me',
+    'return to me',
+    'inventory',
+    'backpack',
+    'items',
+    'chat ',
+    'say ',
+    'tell ',
+    'eat',
+    'food',
+    'hungry',
+    'attack',
+    'fight',
+    'protect',
+    'kill hostile',
+    'zombie',
+    'skeleton',
+    'creeper',
+    'wood',
+    'log',
+    'tree',
+    'oak',
+    'coal',
+    'iron',
+    'diamond',
+    'stone',
+    'cobblestone'
+  ]);
+}
+
 function shouldStopTask(text) {
   const lower = text.toLowerCase();
+  if (/\bstop following\b|\bstop moving\b|\bcancel\b/.test(lower)) {
+    return true;
+  }
+  if (hasPrimaryActionIntent(lower)) {
+    return false;
+  }
   return [
     /\bstop\b/,
-    /\bcancel\b/,
     /\bwait here\b/,
     /\bstay here\b/,
     /\bhold position\b/,
     /\bstand still\b/,
-    /\bstop moving\b/,
-    /\bstop following\b/,
     /\bidle\b/
   ].some((pattern) => pattern.test(lower));
 }
@@ -650,9 +739,25 @@ async function executeTask(text) {
 }
 
 async function followPlayer() {
-  const target = findOwnerOrNearestPlayer();
+  let target = findOwnerOrNearestPlayer();
   if (!target?.player?.entity) {
-    throw new Error(playerTargetHelp('follow'));
+    const fallback = await tryTeleportToOwnerTarget();
+    target = fallback.target;
+    if (!target?.player?.entity && fallback.moved) {
+      pathState = {
+        status: 'waiting_for_player',
+        target: { type: 'player', name: fallback.owner, status: 'teleported_near_owner' },
+        updatedAt: now()
+      };
+      publishStatus();
+      return {
+        text: `Teleported near ${fallback.owner}; waiting for the player entity to load before continuous following.`,
+        keepPathState: true
+      };
+    }
+    if (!target?.player?.entity) {
+      throw new Error(playerTargetHelp('follow'));
+    }
   }
 
   const followDistance = Math.max(1, config.behavior.followDistanceMax);
@@ -667,9 +772,22 @@ async function followPlayer() {
 }
 
 async function goNearPlayer() {
-  const target = findOwnerOrNearestPlayer();
+  let target = findOwnerOrNearestPlayer();
   if (!target?.player?.entity) {
-    throw new Error(playerTargetHelp('regroup'));
+    const fallback = await tryTeleportToOwnerTarget();
+    target = fallback.target;
+    if (!target?.player?.entity && fallback.moved) {
+      pathState = {
+        status: 'waiting_for_player',
+        target: { type: 'player', name: fallback.owner, status: 'teleported_near_owner' },
+        updatedAt: now()
+      };
+      publishStatus();
+      return `Teleported near ${fallback.owner}; waiting for the player entity to load.`;
+    }
+    if (!target?.player?.entity) {
+      throw new Error(playerTargetHelp('regroup'));
+    }
   }
 
   const distance = Math.max(1, config.behavior.followDistanceMin);
