@@ -10,6 +10,7 @@
     "build": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "lint": "tsc --noEmit",
+    "smoke:minecraft-agent": "node scripts/smoke-minecraft-agent.mjs",
     "check:packaged-secrets": "node scripts/check-packaged-secrets.mjs",
     "pack": "npm run build && npm run check:packaged-secrets && electron-builder --dir",
     "dist": "npm run build && npm run check:packaged-secrets && electron-builder --win nsis portable",
