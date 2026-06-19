@@ -5,6 +5,7 @@ import type {
   AppConfig,
   MinecraftAgentEvent,
   MinecraftAgentInventoryResponse,
+  MinecraftAgentPlayerState,
   MinecraftAgentScreenshot,
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
@@ -289,6 +290,67 @@ function normalizeNearbyEntities(value: unknown): string[] | undefined {
   return unique.length > 0 ? unique : undefined;
 }
 
+function normalizePlayerState(value: unknown, fallbackName?: string): MinecraftAgentPlayerState | null {
+  if (!isRecord(value)) {
+    const name = stringOrUndefined(value) || fallbackName;
+    return name ? { updatedAt: Date.now(), name } : null;
+  }
+
+  const name =
+    stringOrUndefined(value.name) ||
+    stringOrUndefined(value.username) ||
+    stringOrUndefined(value.playerName) ||
+    stringOrUndefined(value.player_name) ||
+    stringOrUndefined(value.displayName) ||
+    stringOrUndefined(value.display_name) ||
+    fallbackName;
+  const distance = numberOrUndefined(value.distance ?? value.dist ?? value.distanceToBot ?? value.distance_to_bot ?? value.range);
+  const health = numberOrUndefined(value.health ?? value.hp);
+  const dimension = stringOrUndefined(value.dimension ?? value.world ?? value.realm);
+  const selectedItem = itemLabel(value.selectedItem ?? value.selected_item ?? value.heldItem ?? value.held_item ?? value.mainHand ?? value.main_hand);
+  const position = normalizePosition(value.position ?? value.pos ?? value.location ?? value.coords ?? value.xyz ?? value);
+  const state: MinecraftAgentPlayerState = { updatedAt: Date.now() };
+
+  if (name) state.name = name;
+  if (distance !== undefined) state.distance = distance;
+  if (health !== undefined) state.health = health;
+  if (dimension) state.dimension = dimension;
+  if (position) state.position = position;
+  if (selectedItem) state.selectedItem = selectedItem;
+
+  const hasUsefulState = Object.entries(state).some(([key, item]) => key !== 'updatedAt' && item !== undefined && item !== null);
+  return hasUsefulState ? state : null;
+}
+
+function normalizePlayerList(value: unknown): MinecraftAgentPlayerState[] | undefined {
+  let players: MinecraftAgentPlayerState[] = [];
+  if (Array.isArray(value)) {
+    players = value.map((item) => normalizePlayerState(item)).filter((item): item is MinecraftAgentPlayerState => Boolean(item));
+  } else if (isRecord(value)) {
+    players = Object.entries(value)
+      .map(([name, raw]) => {
+        if (isRecord(raw)) {
+          return normalizePlayerState(raw, name);
+        }
+        const distance = numberOrUndefined(raw);
+        return normalizePlayerState(distance !== undefined ? { name, distance } : raw, name);
+      })
+      .filter((item): item is MinecraftAgentPlayerState => Boolean(item));
+  }
+
+  const seen = new Set<string>();
+  const unique = players.filter((player) => {
+    const key = [player.name || '', player.distance ?? '', player.position?.x ?? '', player.position?.y ?? '', player.position?.z ?? ''].join('|');
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+
+  return unique.length > 0 ? unique.slice(0, 8) : undefined;
+}
+
 function statusCandidates(frame: Record<string, unknown>): Record<string, unknown>[] {
   const candidates = [frame];
   for (let index = 0; index < candidates.length && index < 12; index += 1) {
@@ -330,6 +392,10 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   const position = normalizePosition(findStatusValue(candidates, ['position', 'pos', 'location', 'coords', 'xyz'])) || candidates.map(normalizePosition).find(Boolean);
   const equipment = normalizeEquipment(findStatusValue(candidates, ['equipment', 'armor', 'gear']));
   const nearbyEntities = normalizeNearbyEntities(findStatusValue(candidates, ['nearbyEntities', 'nearby_entities', 'entities', 'mobs']));
+  const trackedPlayer = normalizePlayerState(
+    findStatusValue(candidates, ['trackedPlayer', 'tracked_player', 'targetPlayer', 'target_player', 'followTarget', 'follow_target', 'master', 'owner', 'user', 'human', 'nearestPlayer', 'nearest_player'])
+  );
+  const nearbyPlayers = normalizePlayerList(findStatusValue(candidates, ['nearbyPlayers', 'nearby_players', 'players', 'otherPlayers', 'other_players']));
   const selectedItem = itemLabel(findStatusValue(candidates, ['selectedItem', 'selected_item', 'heldItem', 'held_item', 'mainHand', 'main_hand']));
 
   const worldState: MinecraftAgentWorldState = {
@@ -358,9 +424,19 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   if (selectedItem) worldState.selectedItem = selectedItem;
   if (equipment) worldState.equipment = equipment;
   if (nearbyEntities) worldState.nearbyEntities = nearbyEntities;
+  if (trackedPlayer) worldState.trackedPlayer = trackedPlayer;
+  if (nearbyPlayers) worldState.nearbyPlayers = nearbyPlayers;
 
   const hasUsefulState = Object.entries(worldState).some(([key, value]) => key !== 'updatedAt' && value !== undefined && value !== null);
   return hasUsefulState ? worldState : null;
+}
+
+function clonePlayerState(player: MinecraftAgentPlayerState): MinecraftAgentPlayerState {
+  const clone: MinecraftAgentPlayerState = { ...player };
+  if (player.position) {
+    clone.position = { ...player.position };
+  }
+  return clone;
 }
 
 function cloneWorldState(worldState: MinecraftAgentWorldState | null): MinecraftAgentWorldState | null {
@@ -377,6 +453,12 @@ function cloneWorldState(worldState: MinecraftAgentWorldState | null): Minecraft
   }
   if (worldState.nearbyEntities) {
     clone.nearbyEntities = [...worldState.nearbyEntities];
+  }
+  if (worldState.trackedPlayer) {
+    clone.trackedPlayer = clonePlayerState(worldState.trackedPlayer);
+  }
+  if (worldState.nearbyPlayers) {
+    clone.nearbyPlayers = worldState.nearbyPlayers.map(clonePlayerState);
   }
   return clone;
 }

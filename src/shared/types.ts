@@ -312,6 +312,16 @@ export interface MinecraftAgentPosition {
   pitch?: number;
 }
 
+export interface MinecraftAgentPlayerState {
+  updatedAt: number;
+  name?: string;
+  distance?: number;
+  health?: number;
+  dimension?: string;
+  position?: MinecraftAgentPosition;
+  selectedItem?: string;
+}
+
 export interface MinecraftAgentWorldState {
   updatedAt: number;
   health?: number;
@@ -327,6 +337,8 @@ export interface MinecraftAgentWorldState {
   selectedItem?: string;
   equipment?: Record<string, string>;
   nearbyEntities?: string[];
+  trackedPlayer?: MinecraftAgentPlayerState;
+  nearbyPlayers?: MinecraftAgentPlayerState[];
 }
 
 export interface MinecraftAgentStatus {

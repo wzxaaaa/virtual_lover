@@ -7,6 +7,7 @@ import {
   ConversationMessage,
   ActionResult,
   MemoryState,
+  MinecraftAgentPlayerState,
   MinecraftAgentWorldState,
   Mood,
   ProviderEndpointConfig,
@@ -250,6 +251,16 @@ function formatMinecraftInventory(inventory: Record<string, number>): string {
   return items.length > 0 ? items.join('、') : '空';
 }
 
+function formatMinecraftPlayerState(player: MinecraftAgentPlayerState): string {
+  const name = player.name || '玩家';
+  const distance = player.distance !== undefined ? `距离 ${player.distance.toFixed(1)} 格` : '';
+  const position = player.position ? `位置 ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}` : '';
+  const health = player.health !== undefined ? `血量 ${player.health}` : '';
+  const held = player.selectedItem ? `手持 ${player.selectedItem}` : '';
+
+  return [name, distance, position, health, held].filter(Boolean).join('；');
+}
+
 function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null): string {
   if (!worldState) {
     return '身体状态：暂无真实数据。';
@@ -270,7 +281,11 @@ function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null)
         .join('、')}`
     : '';
   const nearby = worldState.nearbyEntities?.length ? `附近 ${worldState.nearbyEntities.slice(0, 8).join('、')}` : '';
-  const parts = [position, health, food, place ? `地点 ${place}` : '', held, equipment, nearby].filter(Boolean);
+  const trackedPlayer = worldState.trackedPlayer ? `队友/用户 ${formatMinecraftPlayerState(worldState.trackedPlayer)}` : '';
+  const nearbyPlayers = worldState.nearbyPlayers?.length
+    ? `附近玩家 ${worldState.nearbyPlayers.slice(0, 5).map(formatMinecraftPlayerState).join('；')}`
+    : '';
+  const parts = [position, health, food, place ? `地点 ${place}` : '', held, equipment, trackedPlayer, nearbyPlayers, nearby].filter(Boolean);
 
   return parts.length > 0 ? `身体状态：${parts.join('；')}。更新时间：${new Date(worldState.updatedAt).toLocaleString('zh-CN')}。` : '身体状态：暂无真实数据。';
 }

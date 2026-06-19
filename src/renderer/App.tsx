@@ -53,6 +53,7 @@ import {
   Live2DTouchSetEntryConfig,
   MemoryState,
   MinecraftAgentAlert,
+  MinecraftAgentPlayerState,
   MinecraftAgentStatus,
   MinecraftAgentTaskResult,
   Mood,
@@ -204,6 +205,14 @@ function isMinecraftAgentTaskResult(value: unknown): value is MinecraftAgentTask
   return value !== null && typeof value === 'object' && 'status' in value && 'query' in value && 'summary' in value;
 }
 
+function formatMinecraftPlayerStateReply(player: MinecraftAgentPlayerState): string {
+  const name = player.name || '玩家';
+  const distance = player.distance !== undefined ? `距离 ${player.distance.toFixed(1)} 格` : '';
+  const position = player.position ? `位置 ${player.position.x.toFixed(1)}, ${player.position.y.toFixed(1)}, ${player.position.z.toFixed(1)}` : '';
+  const held = player.selectedItem ? `手持 ${player.selectedItem}` : '';
+  return [name, distance, position, held].filter(Boolean).join('；');
+}
+
 function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
   const state = status.worldState;
   if (!state) {
@@ -215,7 +224,11 @@ function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
   const food = state.food !== undefined ? `饥饿 ${state.food}` : '';
   const held = state.selectedItem ? `手持 ${state.selectedItem}` : '';
   const nearby = state.nearbyEntities?.length ? `附近 ${state.nearbyEntities.slice(0, 4).join('、')}` : '';
-  const parts = [position, health, food, held, nearby].filter(Boolean);
+  const trackedPlayer = state.trackedPlayer ? `你/队友 ${formatMinecraftPlayerStateReply(state.trackedPlayer)}` : '';
+  const nearbyPlayers = state.nearbyPlayers?.length
+    ? `附近玩家 ${state.nearbyPlayers.slice(0, 3).map(formatMinecraftPlayerStateReply).join('、')}`
+    : '';
+  const parts = [position, health, food, held, trackedPlayer, nearbyPlayers, nearby].filter(Boolean);
 
   return parts.length > 0 ? `我这边：${parts.join('；')}` : '';
 }
