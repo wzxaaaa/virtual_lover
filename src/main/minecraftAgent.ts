@@ -598,9 +598,18 @@ function normalizePlayerState(value: unknown, fallbackName?: string): MinecraftA
   const dimension = stringOrUndefined(value.dimension ?? value.world ?? value.realm);
   const selectedItem = itemLabel(value.selectedItem ?? value.selected_item ?? value.heldItem ?? value.held_item ?? value.mainHand ?? value.main_hand);
   const position = normalizePosition(value.position ?? value.pos ?? value.location ?? value.coords ?? value.xyz ?? value);
+  const visible =
+    value.visible === true ||
+    value.inView === true ||
+    value.in_view === true ||
+    value.loaded === true ||
+    value.hasEntity === true ||
+    value.has_entity === true ||
+    Boolean(position);
   const state: MinecraftAgentPlayerState = { updatedAt: Date.now() };
 
   if (name) state.name = name;
+  if (visible) state.visible = true;
   if (distance !== undefined) state.distance = distance;
   if (health !== undefined) state.health = health;
   if (dimension) state.dimension = dimension;
@@ -994,6 +1003,7 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   const trackedPlayer = normalizePlayerState(
     findStatusValue(candidates, ['trackedPlayer', 'tracked_player', 'targetPlayer', 'target_player', 'followTarget', 'follow_target', 'master', 'owner', 'user', 'human', 'nearestPlayer', 'nearest_player'])
   );
+  const knownPlayers = normalizePlayerList(findStatusValue(candidates, ['knownPlayers', 'known_players', 'onlinePlayers', 'online_players', 'playerList', 'player_list']));
   const nearbyPlayers = normalizePlayerList(findStatusValue(candidates, ['nearbyPlayers', 'nearby_players', 'players', 'otherPlayers', 'other_players']));
   const selectedItem = itemLabel(findStatusValue(candidates, ['selectedItem', 'selected_item', 'heldItem', 'held_item', 'mainHand', 'main_hand']));
   const pathTarget = normalizeTargetState(findStatusValue(candidates, ['target', 'currentTarget', 'current_target', 'destination', 'dest', 'goalTarget', 'goal_target', 'blockTarget', 'block_target']), 'target');
@@ -1056,6 +1066,7 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   if (equipment) worldState.equipment = equipment;
   if (nearbyEntities) worldState.nearbyEntities = nearbyEntities;
   if (trackedPlayer) worldState.trackedPlayer = trackedPlayer;
+  if (knownPlayers) worldState.knownPlayers = knownPlayers;
   if (nearbyPlayers) worldState.nearbyPlayers = nearbyPlayers;
   if (path) worldState.path = path;
   if (danger) worldState.danger = danger;
@@ -1134,6 +1145,9 @@ function cloneWorldState(worldState: MinecraftAgentWorldState | null): Minecraft
   }
   if (worldState.trackedPlayer) {
     clone.trackedPlayer = clonePlayerState(worldState.trackedPlayer);
+  }
+  if (worldState.knownPlayers) {
+    clone.knownPlayers = worldState.knownPlayers.map(clonePlayerState);
   }
   if (worldState.nearbyPlayers) {
     clone.nearbyPlayers = worldState.nearbyPlayers.map(clonePlayerState);

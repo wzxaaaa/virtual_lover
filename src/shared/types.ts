@@ -470,6 +470,7 @@ export interface MinecraftAgentPosition {
 export interface MinecraftAgentPlayerState {
   updatedAt: number;
   name?: string;
+  visible?: boolean;
   distance?: number;
   health?: number;
   dimension?: string;
@@ -569,6 +570,7 @@ export interface MinecraftAgentWorldState {
   equipment?: Record<string, string>;
   nearbyEntities?: string[];
   trackedPlayer?: MinecraftAgentPlayerState;
+  knownPlayers?: MinecraftAgentPlayerState[];
   nearbyPlayers?: MinecraftAgentPlayerState[];
   path?: MinecraftAgentPathState;
   danger?: MinecraftAgentDangerState;

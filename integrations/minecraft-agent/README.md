@@ -35,6 +35,14 @@ npm run smoke:minecraft-agent:safe
 
 This sends `stop and wait safely`, waits for `task_finished`, then prints the latest inventory/status summary. In the app, the same flow is **Market -> MCP -> Minecraft Agent -> Configure -> Safe replay**.
 
+If a `follow me` task does not move the bot, first check whether the bot can actually see you. Set `behavior.owner` (or the app's **Owner** field) to your exact Minecraft username, then bring the bot into your loaded area. With cheats enabled in the LAN world, the fastest first-time fix is:
+
+```text
+/tp VirtualLoverBot <your Minecraft name>
+```
+
+After the bot is near you once, `follow me` can use the live player entity and keep following.
+
 ## Accounts
 
 For LAN/offline testing, `auth: "offline"` and `username: "VirtualLoverBot"` are enough when your server accepts offline players.

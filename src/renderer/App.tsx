@@ -323,10 +323,13 @@ function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
   const nearbyPlayers = state.nearbyPlayers?.length
     ? `附近玩家 ${state.nearbyPlayers.slice(0, 3).map(formatMinecraftPlayerStateReply).join('、')}`
     : '';
+  const knownPlayers = !nearbyPlayers && state.knownPlayers?.length
+    ? `在线玩家 ${state.knownPlayers.slice(0, 4).map((player) => `${player.name || '未知'}${player.visible ? '' : '（不在视野）'}`).join('、')}`
+    : '';
   const path = formatMinecraftPathStateReply(state.path);
   const danger = formatMinecraftDangerStateReply(state.danger);
   const blockInteraction = formatMinecraftBlockInteractionStateReply(state.blockInteraction);
-  const parts = [position, health, food, held, trackedPlayer, nearbyPlayers, path, danger, blockInteraction ? `当前交互 ${blockInteraction}` : '', nearby].filter(Boolean);
+  const parts = [position, health, food, held, trackedPlayer, nearbyPlayers, knownPlayers, path, danger, blockInteraction ? `当前交互 ${blockInteraction}` : '', nearby].filter(Boolean);
 
   return parts.length > 0 ? `我这边：${parts.join('；')}` : '';
 }

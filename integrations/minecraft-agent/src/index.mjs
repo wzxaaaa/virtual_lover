@@ -198,6 +198,7 @@ function playerState(name, player) {
   return {
     updatedAt: now(),
     name,
+    visible: Boolean(entity),
     distance: entity ? Number(distanceToBot(entity)?.toFixed(2)) : null,
     position: vecToPlain(entity?.position),
     health: typeof entity?.health === 'number' ? entity.health : undefined,
@@ -205,11 +206,22 @@ function playerState(name, player) {
   };
 }
 
+function resolvePlayerByName(name) {
+  if (!bot || !name) return null;
+  const exact = bot.players[name];
+  if (exact) return { name, player: exact };
+
+  const wanted = String(name).toLowerCase();
+  const entry = Object.entries(bot.players).find(([playerName]) => playerName.toLowerCase() === wanted);
+  return entry ? { name: entry[0], player: entry[1] } : null;
+}
+
 function findOwnerOrNearestPlayer() {
   if (!bot) return null;
   const owner = config.behavior.owner;
-  if (owner && bot.players[owner]?.entity) {
-    return { name: owner, player: bot.players[owner] };
+  const ownerPlayer = resolvePlayerByName(owner);
+  if (ownerPlayer?.player?.entity) {
+    return ownerPlayer;
   }
 
   let best = null;
@@ -224,6 +236,15 @@ function findOwnerOrNearestPlayer() {
   return best;
 }
 
+function knownPlayers() {
+  if (!bot) return [];
+  return Object.entries(bot.players)
+    .filter(([name]) => name !== bot.username)
+    .map(([name, player]) => playerState(name, player))
+    .sort((a, b) => Number(b.visible) - Number(a.visible) || (a.distance ?? 9999) - (b.distance ?? 9999))
+    .slice(0, 12);
+}
+
 function nearbyPlayers() {
   if (!bot) return [];
   return Object.entries(bot.players)
@@ -231,6 +252,26 @@ function nearbyPlayers() {
     .map(([name, player]) => playerState(name, player))
     .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
     .slice(0, 8);
+}
+
+function botPositionText() {
+  const position = vecToPlain(bot?.entity?.position);
+  if (!position) return 'unknown position';
+  return `x=${position.x} y=${position.y} z=${position.z}`;
+}
+
+function playerTargetHelp(action) {
+  const owner = String(config.behavior.owner || '').trim();
+  const known = knownPlayers();
+  const visible = known.filter((player) => player.visible).map((player) => player.name).filter(Boolean);
+  const all = known.map((player) => player.name).filter(Boolean);
+  const ownerText = owner ? `Owner is "${owner}".` : 'Owner is not set.';
+  const visibleText = visible.length ? `Visible players: ${visible.join(', ')}.` : 'No player is currently visible to the bot.';
+  const knownText = all.length ? `Known online players: ${all.join(', ')}.` : 'No other online player is known yet.';
+  const tpHint = owner
+    ? `/tp ${bot?.username || config.minecraft.username} ${owner}`
+    : `/tp ${bot?.username || config.minecraft.username} <your Minecraft name>`;
+  return `Cannot ${action}: no visible owner/player target. ${ownerText} ${visibleText} ${knownText} Bot is at ${botPositionText()}. Move close to the bot, set Owner to your exact Minecraft name, or enable cheats and run "${tpHint}" in Minecraft chat.`;
 }
 
 function nearbyEntities() {
@@ -292,6 +333,7 @@ function statusPayload() {
     selectedItem: itemName(selected),
     inventory: inventorySnapshot(),
     trackedPlayer,
+    knownPlayers: knownPlayers(),
     nearbyPlayers: nearbyPlayers(),
     nearbyEntities: nearbyEntities(),
     path: pathState,
@@ -591,7 +633,7 @@ async function executeTask(text) {
 async function followPlayer() {
   const target = findOwnerOrNearestPlayer();
   if (!target?.player?.entity) {
-    throw new Error('No owner or nearby player found to follow.');
+    throw new Error(playerTargetHelp('follow'));
   }
 
   const followDistance = Math.max(1, config.behavior.followDistanceMax);
@@ -608,7 +650,7 @@ async function followPlayer() {
 async function goNearPlayer() {
   const target = findOwnerOrNearestPlayer();
   if (!target?.player?.entity) {
-    throw new Error('No owner or nearby player found.');
+    throw new Error(playerTargetHelp('regroup'));
   }
 
   const distance = Math.max(1, config.behavior.followDistanceMin);
