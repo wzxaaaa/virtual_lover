@@ -16,6 +16,7 @@
     "followDistanceMax": 5,
     "regroupDistance": 8,
     "statusIntervalMs": 2000,
+    "commandFollowIntervalMs": 3500,
     "maxDigBlocksPerTask": 4,
     "searchRadius": 32
   }

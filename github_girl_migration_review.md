@@ -219,7 +219,9 @@
 - `P17` 已补第三十四段跟随意图解析修复：实机发现模型会下发 “follow the player at a safe 3 to 5 block distance, stay out of the player's path”，旧版 starter 因为用简单 `includes("stay")` 把 `stay out` 误判成停止，导致用户说“跟着我”后回包却是 `Stopped and waiting`。本轮新增精确停止意图匹配，只匹配 `stop/cancel/wait here/stay here/hold position/stand still/stop following` 等明确停止语义；`stay out of the player's path` 不再触发 stop。同时 `followPlayer()` 成功后保留 `pathState.status="following"`，不再被 `task_finished` 的 ok 分支立刻重置成 idle。适配点：如果 bot 仍看不到 Owner/玩家实体，follow 会返回第三十三段的目标诊断，而不是假装开始移动。
 - `P17` 已补第三十五段首次会合兜底：实机继续发现 `follow ... stop or wait if unsafe` 里包含 `stop`，需要把“主要动作”与“安全条件”分开解析；本轮新增 `hasPrimaryActionIntent()`，当任务包含 follow/挖掘/攻击/聊天等主动作时，`stop or wait if unsafe` 不再覆盖主动作。另为当前 LAN 环境中 `bot.players` 不稳定的问题补 `playerTargets()`，会从 `bot.players` 和 `bot.entities` 的 player 实体合并寻找 Owner/最近玩家；若仍看不到 Owner 但配置了 Owner，则 follow/regroup 会先自动发送 `/tp VirtualLoverBot <Owner>` 做首次会合，传送成功但仍未拿到实体时把路径状态标为 `waiting_for_player / teleported_near_owner`。适配点：这解决“先把她带到身边”的体验；真正连续步行跟随仍要求 mineflayer 能看到玩家实体坐标。
 
-当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.82%，完整游戏 Agent 自主玩法约 95%。
+- `P17` 已补第三十六段真实联机跟随兜底：实机验证当前 LAN/离线世界里游戏 Tab 能看到 `Steve` 和 `VirtualLoverBot`，但 mineflayer 仍可能回报 `knownPlayers: [] / nearbyPlayers: []`，导致 `/tp` 一次后仍无法进入 `GoalFollow`。本轮把玩家实体识别放宽到 `username/profile/kind`，避免非标准 `entity.type` 漏识别；同时新增 `command_follow_fallback` 能力和 `commandFollow` 状态。当 follow 看不到 Owner 实体但配置了 Owner 时，starter 会进入 `command_following`，按 `behavior.commandFollowIntervalMs` 周期发送 `/tp <bot> <Owner>`，并在后续一旦看到真实玩家实体时自动切回 pathfinder `GoalFollow`。停止、断线、死亡或非跟随任务会清理该循环。适配点：这是当前 LAN 环境下让“跟着我”真的持续生效的保守兜底；它依赖世界允许 bot 执行 `/tp`，且不是自然步行保持 3-5 格，后续仍应优先让外部 mc-agent 稳定输出玩家实体坐标。
+
+当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.86%，完整游戏 Agent 自主玩法约 95.2%。
 
 ## Agent / Minecraft 剩余缺口
 

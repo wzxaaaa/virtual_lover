@@ -41,7 +41,7 @@ If a `follow me` task does not move the bot, first check whether the bot can act
 /tp VirtualLoverBot <your Minecraft name>
 ```
 
-After the bot is near you once, `follow me` can use the live player entity and keep following.
+When Mineflayer can see the live player entity, `follow me` uses pathfinder `GoalFollow`. Some LAN/offline worlds expose the owner in the in-game player list but do not expose a usable player entity to Mineflayer. In that case, `follow me` starts a conservative command-follow fallback: the bot sends `/tp <bot> <owner>` every `behavior.commandFollowIntervalMs` milliseconds until the player entity becomes visible or you tell it to stop.
 
 ## Accounts
 

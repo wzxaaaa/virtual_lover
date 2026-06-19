@@ -15,6 +15,7 @@ const CAPABILITIES = [
   'danger_state',
   'world_join_state',
   'game_chat',
+  'command_follow_fallback',
   'shared_containers',
   'block_interaction'
 ];
@@ -70,6 +71,9 @@ let currentTask = null;
 let pathState = { status: 'idle' };
 let worldJoinState = { phase: 'unknown', connectedToWorld: false, updatedAt: now(), detail: 'Minecraft bot has not started yet.' };
 let lastHealth = null;
+let commandFollowTimer = null;
+let commandFollowState = null;
+let commandFollowInFlight = false;
 
 function now() {
   return Date.now();
@@ -151,6 +155,7 @@ async function ensureConfig(configPath) {
       followDistanceMax: asNumber(parsed.behavior?.followDistanceMax, 5),
       regroupDistance: asNumber(parsed.behavior?.regroupDistance, 8),
       statusIntervalMs: asNumber(parsed.behavior?.statusIntervalMs, 2000),
+      commandFollowIntervalMs: asNumber(parsed.behavior?.commandFollowIntervalMs, 3500),
       maxDigBlocksPerTask: asNumber(parsed.behavior?.maxDigBlocksPerTask, 4),
       searchRadius: asNumber(parsed.behavior?.searchRadius, 32)
     }
@@ -197,6 +202,18 @@ function distanceToBot(entity) {
   return bot.entity.position.distanceTo(entity.position);
 }
 
+function textValue(value) {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number') return String(value);
+  if (value && typeof value === 'object') {
+    if (typeof value.text === 'string') return value.text;
+    if (Array.isArray(value.extra)) {
+      return value.extra.map((part) => textValue(part)).join('');
+    }
+  }
+  return '';
+}
+
 function playerState(name, player) {
   const entity = player?.entity;
   return {
@@ -211,7 +228,18 @@ function playerState(name, player) {
 }
 
 function entityPlayerName(entity) {
-  return String(entity?.username || entity?.profile?.name || entity?.displayName || entity?.name || '').trim();
+  return [entity?.username, entity?.profile?.name, entity?.displayName, entity?.name]
+    .map((value) => textValue(value).trim())
+    .find(Boolean) || '';
+}
+
+function isPlayerEntity(entity) {
+  if (!entity || entity === bot?.entity || !entity.position) return false;
+  if (entity.type === 'player') return true;
+  if (String(entity.kind || '').toLowerCase() === 'player') return true;
+  const username = textValue(entity.username || entity.profile?.name).trim();
+  if (username && username !== bot?.username) return true;
+  return Object.values(bot?.players || {}).some((player) => player?.entity === entity);
 }
 
 function playerTargets() {
@@ -227,7 +255,7 @@ function playerTargets() {
   }
 
   for (const entity of Object.values(bot.entities)) {
-    if (!entity || entity === bot.entity || entity.type !== 'player') continue;
+    if (!isPlayerEntity(entity)) continue;
     const name = entityPlayerName(entity);
     if (!name || name === bot.username) continue;
     const key = name.toLowerCase();
@@ -347,6 +375,19 @@ function dangerState() {
   };
 }
 
+function commandFollowStatus() {
+  if (!commandFollowState) return null;
+  return {
+    active: true,
+    owner: commandFollowState.owner,
+    startedAt: commandFollowState.startedAt,
+    lastCommandAt: commandFollowState.lastCommandAt || null,
+    lastMoveDistance: commandFollowState.lastMoveDistance ?? null,
+    intervalMs: commandFollowState.intervalMs,
+    lastError: commandFollowState.lastError || null
+  };
+}
+
 function statusPayload() {
   const tracked = findOwnerOrNearestPlayer();
   const trackedPlayer = tracked ? playerState(tracked.name, tracked.player) : null;
@@ -385,6 +426,7 @@ function statusPayload() {
     nearbyEntities: nearbyEntities(),
     path: pathState,
     target: pathState.target || null,
+    commandFollow: commandFollowStatus(),
     danger: dangerState(),
     sharedContainers: {
       status: 'not_implemented',
@@ -468,6 +510,7 @@ async function connectMinecraft() {
   });
 
   bot.on('death', () => {
+    clearCommandFollow();
     broadcast({ type: 'alert', severity: 'danger', cause: 'death', text: 'Bot died.' });
     finishTask('blocked', 'I died before finishing the task.');
   });
@@ -487,6 +530,7 @@ async function connectMinecraft() {
   });
 
   bot.on('end', () => {
+    clearCommandFollow();
     setWorldJoinState('left', 'Minecraft bot disconnected.');
     log('Minecraft bot disconnected.');
     finishTask('interrupted', 'Minecraft connection ended.');
@@ -534,7 +578,7 @@ function startBridge() {
   console.log(`[virtual-lover-mc-agent] Bridge listening at ws://${config.bridge.host}:${config.bridge.port}`);
 }
 
-async function sendGameChat(text) {
+async function sendGameChat(text, options = {}) {
   const clean = text.trim();
   if (!clean) return;
   if (!bot?.entity) {
@@ -542,7 +586,9 @@ async function sendGameChat(text) {
     return;
   }
   await bot.chat(clean.slice(0, 240));
-  broadcast({ type: 'chat', sender: bot.username, role: 'bot', outgoing: true, text: clean, timestamp: now() });
+  if (options.broadcastOutgoing !== false) {
+    broadcast({ type: 'chat', sender: bot.username, role: 'bot', outgoing: true, text: clean, timestamp: now() });
+  }
 }
 
 function finishTask(status, text, extra = {}) {
@@ -640,6 +686,134 @@ function shouldStopTask(text) {
   ].some((pattern) => pattern.test(lower));
 }
 
+function hasFollowIntent(text) {
+  return taskIncludes(text, ['follow', 'stay near', 'with me', 'keep up']);
+}
+
+function clearCommandFollow() {
+  if (commandFollowTimer) {
+    clearInterval(commandFollowTimer);
+  }
+  commandFollowTimer = null;
+  commandFollowState = null;
+  commandFollowInFlight = false;
+}
+
+function commandFollowIntervalMs() {
+  return Math.max(1500, asNumber(config?.behavior?.commandFollowIntervalMs, 3500));
+}
+
+function setCommandFollowPath(owner, patch = {}) {
+  const updatedAt = now();
+  pathState = {
+    status: 'command_following',
+    target: {
+      type: 'player',
+      name: owner,
+      status: 'command_teleport_follow',
+      visible: false,
+      lastCommandAt: patch.lastCommandAt || updatedAt,
+      lastMoveDistance: patch.lastMoveDistance ?? null
+    },
+    updatedAt
+  };
+}
+
+async function commandFollowTick(reason = 'interval') {
+  if (!commandFollowState || commandFollowInFlight || !bot?.entity) {
+    return { sent: false, moved: false, visible: false, owner: commandFollowState?.owner || '' };
+  }
+
+  commandFollowInFlight = true;
+  const owner = commandFollowState.owner;
+  const startedAt = commandFollowState.startedAt;
+  const resolvedOwner = resolvePlayerByName(owner)?.name || owner;
+  const before = bot.entity.position?.clone?.();
+
+  try {
+    await sendGameChat(`/tp ${bot.username || config.minecraft.username} ${resolvedOwner}`, { broadcastOutgoing: reason === 'start' });
+    await wait(700);
+    const movedDistance = before && bot.entity?.position ? bot.entity.position.distanceTo(before) : null;
+    if (!commandFollowState || commandFollowState.startedAt !== startedAt) {
+      return {
+        sent: true,
+        moved: movedDistance === null ? false : movedDistance > 0.25,
+        visible: false,
+        owner: resolvedOwner
+      };
+    }
+    const visibleTarget = findOwnerOrNearestPlayer();
+
+    if (visibleTarget?.player?.entity) {
+      clearCommandFollow();
+      const followDistance = Math.max(1, config.behavior.followDistanceMax);
+      pathState = {
+        status: 'following',
+        target: { type: 'player', name: visibleTarget.name, distance: visibleTarget.distance ?? null },
+        updatedAt: now()
+      };
+      bot.pathfinder.setGoal(new goals.GoalFollow(visibleTarget.player.entity, followDistance), true);
+      publishStatus();
+      return { sent: true, moved: true, visible: true, owner: visibleTarget.name };
+    }
+
+    commandFollowState = {
+      ...commandFollowState,
+      owner: resolvedOwner,
+      lastCommandAt: now(),
+      lastMoveDistance: movedDistance === null ? null : Number(movedDistance.toFixed(2)),
+      lastError: null
+    };
+    setCommandFollowPath(resolvedOwner, {
+      lastCommandAt: commandFollowState.lastCommandAt,
+      lastMoveDistance: commandFollowState.lastMoveDistance
+    });
+    publishStatus();
+    return {
+      sent: true,
+      moved: movedDistance === null ? false : movedDistance > 0.25,
+      visible: false,
+      owner: resolvedOwner
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    commandFollowState = { ...commandFollowState, lastError: message };
+    pathState = {
+      status: 'blocked',
+      target: { type: 'player', name: resolvedOwner, status: 'command_follow_failed', error: message },
+      updatedAt: now()
+    };
+    clearCommandFollow();
+    publishStatus();
+    throw error;
+  } finally {
+    commandFollowInFlight = false;
+  }
+}
+
+async function startCommandFollow(owner) {
+  const cleanOwner = String(owner || '').trim();
+  if (!cleanOwner) return { sent: false, moved: false, visible: false, owner: '' };
+
+  clearCommandFollow();
+  const intervalMs = commandFollowIntervalMs();
+  commandFollowState = {
+    owner: cleanOwner,
+    startedAt: now(),
+    lastCommandAt: null,
+    lastMoveDistance: null,
+    intervalMs,
+    lastError: null
+  };
+  setCommandFollowPath(cleanOwner);
+  commandFollowTimer = setInterval(() => {
+    void commandFollowTick().catch((error) => {
+      log(`Command follow fallback failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, intervalMs);
+  return commandFollowTick('start');
+}
+
 async function runTask(taskText, taskId, client) {
   const clean = taskText.trim();
   if (!clean) {
@@ -648,6 +822,7 @@ async function runTask(taskText, taskId, client) {
   if (currentTask) {
     log(`Interrupting previous task: ${currentTask.text}`);
     bot?.pathfinder?.setGoal(null);
+    clearCommandFollow();
     currentTask = null;
   }
 
@@ -678,12 +853,18 @@ function cryptoRandomId() {
 
 async function executeTask(text) {
   const lower = text.toLowerCase();
+  const followIntent = hasFollowIntent(lower);
 
   if (shouldStopTask(lower)) {
     bot.pathfinder.setGoal(null);
     bot.clearControlStates();
+    clearCommandFollow();
     pathState = { status: 'idle', updatedAt: now() };
     return 'Stopped and waiting.';
+  }
+
+  if (!followIntent) {
+    clearCommandFollow();
   }
 
   if (taskIncludes(lower, ['inventory', 'backpack', 'items'])) {
@@ -707,7 +888,7 @@ async function executeTask(text) {
     return attackNearestHostile();
   }
 
-  if (taskIncludes(lower, ['follow', 'stay near', 'with me', 'keep up'])) {
+  if (followIntent) {
     return followPlayer();
   }
 
@@ -741,25 +922,21 @@ async function executeTask(text) {
 async function followPlayer() {
   let target = findOwnerOrNearestPlayer();
   if (!target?.player?.entity) {
-    const fallback = await tryTeleportToOwnerTarget();
-    target = fallback.target;
-    if (!target?.player?.entity && fallback.moved) {
-      pathState = {
-        status: 'waiting_for_player',
-        target: { type: 'player', name: fallback.owner, status: 'teleported_near_owner' },
-        updatedAt: now()
-      };
-      publishStatus();
+    const owner = String(config.behavior.owner || '').trim();
+    if (owner) {
+      const fallback = await startCommandFollow(owner);
+      if (fallback.visible) {
+        return { text: `Started following ${fallback.owner}.`, keepPathState: true };
+      }
       return {
-        text: `Teleported near ${fallback.owner}; waiting for the player entity to load before continuous following.`,
+        text: `Started command follow fallback for ${fallback.owner || owner}. I will keep teleporting near the owner until the player entity becomes visible or you tell me to stop.`,
         keepPathState: true
       };
     }
-    if (!target?.player?.entity) {
-      throw new Error(playerTargetHelp('follow'));
-    }
+    throw new Error(playerTargetHelp('follow'));
   }
 
+  clearCommandFollow();
   const followDistance = Math.max(1, config.behavior.followDistanceMax);
   pathState = {
     status: 'following',
@@ -867,6 +1044,7 @@ async function eatFood() {
 
 function stopAll() {
   if (statusTimer) windowClearInterval(statusTimer);
+  clearCommandFollow();
   bridge?.close();
   bot?.quit?.('Virtual Lover agent shutting down');
 }
