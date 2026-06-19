@@ -2058,7 +2058,8 @@ body.neko-model-dragging .pet-floating-toolbar * {
   white-space: nowrap;
 }
 
-.marketplace-config input:not([type='checkbox']):not([type='range']) {
+.marketplace-config input:not([type='checkbox']):not([type='range']),
+.marketplace-config select {
   width: 100%;
   min-width: 0;
   height: 34px;
@@ -2067,6 +2068,10 @@ body.neko-model-dragging .pet-floating-toolbar * {
   color: #242c36;
   background: rgba(255, 255, 255, 0.8);
   border: 1px solid rgba(38, 44, 54, 0.13);
+}
+
+.marketplace-config select {
+  cursor: pointer;
 }
 
 .marketplace-config input[type='range'] {
@@ -2120,6 +2125,40 @@ body.neko-model-dragging .pet-floating-toolbar * {
 .minecraft-agent-starter small {
   color: #687386;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.minecraft-agent-diagnostics {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.minecraft-agent-diagnostics li {
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.38;
+  word-break: break-word;
+}
+
+.minecraft-agent-diagnostics li.is-ok {
+  color: #0f6d64;
+  background: rgba(38, 170, 154, 0.1);
+}
+
+.minecraft-agent-diagnostics li.is-warn {
+  color: #755320;
+  background: rgba(223, 159, 73, 0.15);
+}
+
+.minecraft-agent-diagnostics li.is-error {
+  color: #9b3430;
+  background: rgba(211, 57, 50, 0.11);
 }
 
 .minecraft-agent-status {
@@ -2192,6 +2231,17 @@ body.neko-model-dragging .pet-floating-toolbar * {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.minecraft-agent-form-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.minecraft-agent-form-grid label {
+  min-width: 0;
 }
 
 .minecraft-agent-error,

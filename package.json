@@ -41,6 +41,7 @@
     "files": [
       "out/**/*",
       "integrations/minecraft-agent/package.json",
+      "integrations/minecraft-agent/package-lock.json",
       "integrations/minecraft-agent/README.md",
       "integrations/minecraft-agent/config.example.json",
       "integrations/minecraft-agent/start-windows.cmd",
@@ -48,6 +49,9 @@
       "!integrations/minecraft-agent/node_modules/**/*",
       "!integrations/minecraft-agent/config.json",
       "package.json"
+    ],
+    "asarUnpack": [
+      "integrations/minecraft-agent/**/*"
     ],
     "win": {
       "signAndEditExecutable": false,

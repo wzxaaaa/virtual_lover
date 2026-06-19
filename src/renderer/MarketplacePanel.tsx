@@ -17,7 +17,12 @@ import {
   type MarketplaceItem,
   type MarketplaceTab
 } from '../shared/marketplace';
-import type { AppConfig, MinecraftAgentStarterInfo, MinecraftAgentStatus } from '../shared/types';
+import type {
+  AppConfig,
+  MinecraftAgentStarterConfigPatch,
+  MinecraftAgentStarterInfo,
+  MinecraftAgentStatus
+} from '../shared/types';
 import { openExternalUrl } from './openExternal';
 
 interface MarketplacePanelProps {
@@ -33,7 +38,38 @@ interface MarketplaceCardProps extends MarketplacePanelProps {
 
 type UpdateAgentConfig = (agentPatch: Partial<AppConfig['agent']>) => void;
 
+type MinecraftAgentStarterConfigForm = Required<
+  Pick<
+    MinecraftAgentStarterConfigPatch,
+    | 'bridgeHost'
+    | 'bridgePort'
+    | 'minecraftHost'
+    | 'minecraftPort'
+    | 'username'
+    | 'auth'
+    | 'owner'
+    | 'followDistanceMin'
+    | 'followDistanceMax'
+    | 'regroupDistance'
+  >
+> & {
+  version: string;
+};
+
 const MC_AGENT_ADMIN_DEFAULT_URL = 'http://localhost:8765';
+const DEFAULT_STARTER_CONFIG_FORM: MinecraftAgentStarterConfigForm = {
+  bridgeHost: '127.0.0.1',
+  bridgePort: 48909,
+  minecraftHost: '127.0.0.1',
+  minecraftPort: 55916,
+  username: 'VirtualLoverBot',
+  auth: 'offline',
+  version: '',
+  owner: '',
+  followDistanceMin: 3,
+  followDistanceMax: 5,
+  regroupDistance: 8
+};
 
 const MC_AGENT_DOWNLOAD_LINKS = [
   { id: 'quark', label: '夸克网盘', url: 'https://pan.quark.cn/s/b662424f7f34' },
@@ -53,6 +89,57 @@ const MC_AGENT_SETUP_STEPS = [
   '打开 mc-agent 管理面板，把 bot 的 port 改成刚才的 LAN 端口并保存。',
   '看到 “Neko joined the game” 后，她就是真正在世界里的第二个玩家。'
 ];
+
+function starterInfoFallback(error: unknown): MinecraftAgentStarterInfo {
+  return {
+    available: false,
+    rootDir: 'integrations/minecraft-agent',
+    startScript: 'integrations/minecraft-agent/start-windows.cmd',
+    packageJson: 'integrations/minecraft-agent/package.json',
+    readmePath: 'integrations/minecraft-agent/README.md',
+    configPath: 'integrations/minecraft-agent/config.json',
+    configExists: false,
+    startScriptExists: false,
+    nodeModulesInstalled: false,
+    diagnostics: [
+      {
+        level: 'error',
+        message: error instanceof Error ? error.message : 'Minecraft Agent starter info unavailable.'
+      }
+    ],
+    installCommand: 'cd integrations/minecraft-agent && npm install',
+    startCommand: 'cd integrations/minecraft-agent && npm start',
+    error: error instanceof Error ? error.message : 'Minecraft Agent starter info unavailable.'
+  };
+}
+
+function starterFormFromInfo(info: MinecraftAgentStarterInfo | null): MinecraftAgentStarterConfigForm {
+  const config = info?.currentConfig;
+  if (!config) {
+    return DEFAULT_STARTER_CONFIG_FORM;
+  }
+
+  return {
+    bridgeHost: config.bridgeHost,
+    bridgePort: config.bridgePort,
+    minecraftHost: config.minecraftHost,
+    minecraftPort: config.minecraftPort,
+    username: config.username,
+    auth: config.auth,
+    version: config.version || '',
+    owner: config.owner,
+    followDistanceMin: config.followDistanceMin,
+    followDistanceMax: config.followDistanceMax,
+    regroupDistance: config.regroupDistance
+  };
+}
+
+function starterPatchFromForm(form: MinecraftAgentStarterConfigForm): MinecraftAgentStarterConfigPatch {
+  return {
+    ...form,
+    version: form.version.trim() || false
+  };
+}
 
 function MarketplaceStatusBadge({ item }: { item: MarketplaceItem }): ReactElement {
   return <span className={`marketplace-status is-${item.status}`}>{marketplaceStatusLabel(item.status)}</span>;
@@ -103,8 +190,28 @@ function MinecraftAgentMarketplaceConfig({
 }): ReactElement {
   const [agentStatus, setAgentStatus] = useState<MinecraftAgentStatus | null>(null);
   const [starterInfo, setStarterInfo] = useState<MinecraftAgentStarterInfo | null>(null);
+  const [starterConfigForm, setStarterConfigForm] = useState<MinecraftAgentStarterConfigForm>(DEFAULT_STARTER_CONFIG_FORM);
   const [statusLoading, setStatusLoading] = useState(false);
   const [launchMessage, setLaunchMessage] = useState('');
+
+  const applyStarterInfo = useCallback((info: MinecraftAgentStarterInfo): void => {
+    setStarterInfo(info);
+    setStarterConfigForm(starterFormFromInfo(info));
+  }, []);
+
+  const refreshStarterInfo = useCallback(async (): Promise<void> => {
+    if (typeof window.lover.getMinecraftAgentStarterInfo !== 'function') {
+      applyStarterInfo(starterInfoFallback(new Error('Minecraft Agent starter IPC is unavailable.')));
+      return;
+    }
+
+    try {
+      const info = await window.lover.getMinecraftAgentStarterInfo();
+      applyStarterInfo(info);
+    } catch (error) {
+      applyStarterInfo(starterInfoFallback(error));
+    }
+  }, [applyStarterInfo]);
 
   const refreshStatus = useCallback(async (): Promise<void> => {
     setStatusLoading(true);
@@ -131,28 +238,19 @@ function MinecraftAgentMarketplaceConfig({
       .getMinecraftAgentStarterInfo()
       .then((info) => {
         if (active) {
-          setStarterInfo(info);
+          applyStarterInfo(info);
         }
       })
       .catch((error) => {
         if (active) {
-          setStarterInfo({
-            available: false,
-            rootDir: 'integrations/minecraft-agent',
-            startScript: 'integrations/minecraft-agent/start-windows.cmd',
-            packageJson: 'integrations/minecraft-agent/package.json',
-            readmePath: 'integrations/minecraft-agent/README.md',
-            installCommand: 'cd integrations/minecraft-agent && npm install',
-            startCommand: 'cd integrations/minecraft-agent && npm start',
-            error: error instanceof Error ? error.message : 'Minecraft Agent starter info unavailable.'
-          });
+          applyStarterInfo(starterInfoFallback(error));
         }
       });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [applyStarterInfo]);
 
   useEffect(() => {
     let active = true;
@@ -198,6 +296,31 @@ function MinecraftAgentMarketplaceConfig({
       ? `${agentStatus.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'} ${new Date(agentStatus.lastNudgeAt).toLocaleTimeString('zh-CN')}`
       : '暂无';
   const adminUrl = config.agent.minecraftAgentAdminUrl || MC_AGENT_ADMIN_DEFAULT_URL;
+
+  const updateStarterConfigForm = (patch: Partial<MinecraftAgentStarterConfigForm>): void => {
+    setStarterConfigForm((current) => ({ ...current, ...patch }));
+  };
+
+  const saveStarterConfig = async (patch: MinecraftAgentStarterConfigPatch = starterPatchFromForm(starterConfigForm)): Promise<void> => {
+    if (typeof window.lover.saveMinecraftAgentStarterConfig !== 'function') {
+      setLaunchMessage('当前窗口还没有加载 Minecraft Agent 配置保存接口，请重启应用后再试。');
+      return;
+    }
+
+    try {
+      const info = await window.lover.saveMinecraftAgentStarterConfig(patch);
+      applyStarterInfo(info);
+      if (info.currentConfig?.bridgeUrl) {
+        updateAgent({ minecraftAgentWsUrl: info.currentConfig.bridgeUrl });
+      }
+      setLaunchMessage('Minecraft Agent 本地配置已保存。');
+      window.setTimeout(() => {
+        void refreshStatus();
+      }, 600);
+    } catch (error) {
+      setLaunchMessage(error instanceof Error ? error.message : 'Minecraft Agent 本地配置保存失败。');
+    }
+  };
 
   const openAdminPanel = (): void => {
     openExternalUrl(adminUrl);
@@ -258,7 +381,18 @@ function MinecraftAgentMarketplaceConfig({
             {starterInfo.startCommand}
           </small>
         ) : null}
+        {starterInfo?.configPath ? <small>{starterInfo.configPath}</small> : null}
       </div>
+
+      {starterInfo?.diagnostics?.length ? (
+        <ul className="minecraft-agent-diagnostics" aria-label="Minecraft Agent diagnostics">
+          {starterInfo.diagnostics.map((diagnostic, index) => (
+            <li key={`${diagnostic.level}-${index}`} className={`is-${diagnostic.level}`}>
+              {diagnostic.message}
+            </li>
+          ))}
+        </ul>
+      ) : null}
 
       <div className="minecraft-agent-status" aria-live="polite">
         <div className="minecraft-agent-status-row">
@@ -281,6 +415,93 @@ function MinecraftAgentMarketplaceConfig({
           <strong>{lastNudge}</strong>
         </div>
         {lastError ? <div className="minecraft-agent-error">{lastError}</div> : null}
+      </div>
+
+      <div className="minecraft-agent-form-grid">
+        <label>
+          <span>Bridge Host</span>
+          <input
+            type="text"
+            value={starterConfigForm.bridgeHost}
+            onChange={(event) => updateStarterConfigForm({ bridgeHost: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Bridge Port</span>
+          <input
+            max="65535"
+            min="1"
+            type="number"
+            value={starterConfigForm.bridgePort}
+            onChange={(event) => updateStarterConfigForm({ bridgePort: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          <span>MC Host</span>
+          <input
+            type="text"
+            value={starterConfigForm.minecraftHost}
+            onChange={(event) => updateStarterConfigForm({ minecraftHost: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>LAN Port</span>
+          <input
+            max="65535"
+            min="1"
+            type="number"
+            value={starterConfigForm.minecraftPort}
+            onChange={(event) => updateStarterConfigForm({ minecraftPort: Number(event.target.value) })}
+          />
+        </label>
+        <label>
+          <span>Bot Username</span>
+          <input
+            type="text"
+            value={starterConfigForm.username}
+            onChange={(event) => updateStarterConfigForm({ username: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Auth</span>
+          <select value={starterConfigForm.auth} onChange={(event) => updateStarterConfigForm({ auth: event.target.value })}>
+            <option value="offline">offline</option>
+            <option value="microsoft">microsoft</option>
+          </select>
+        </label>
+        <label>
+          <span>Owner</span>
+          <input
+            placeholder="你的 Minecraft 名字，可留空"
+            type="text"
+            value={starterConfigForm.owner}
+            onChange={(event) => updateStarterConfigForm({ owner: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>MC Version</span>
+          <input
+            placeholder="自动识别可留空"
+            type="text"
+            value={starterConfigForm.version}
+            onChange={(event) => updateStarterConfigForm({ version: event.target.value })}
+          />
+        </label>
+      </div>
+
+      <div className="minecraft-agent-actions">
+        <button className="minecraft-agent-button" type="button" onClick={() => void refreshStarterInfo()}>
+          <RefreshCw size={15} />
+          刷新诊断
+        </button>
+        <button className="minecraft-agent-button" type="button" onClick={() => void saveStarterConfig({})}>
+          <Settings2 size={15} />
+          生成默认配置
+        </button>
+        <button className="minecraft-agent-button" type="button" onClick={() => void saveStarterConfig()}>
+          <Settings2 size={15} />
+          保存 starter 配置
+        </button>
       </div>
 
       <label>

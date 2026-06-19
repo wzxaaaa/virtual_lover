@@ -1,7 +1,10 @@
 import { app, BrowserWindow, ipcMain, nativeTheme, screen, session, shell } from 'electron';
 import type { Rectangle } from 'electron';
+import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { copyFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { cancelAgentTask, listAgentTaskEvents, listAgentTasks, loadPersistedAgentTasks, onAgentTaskEvent, runAutomationTask } from './agentTasks';
 import { executeAutomationActionTool, invokeAgentTool, listAgentTools } from './agentTools';
 import { loadConfig, saveConfig } from './config';
@@ -25,6 +28,9 @@ import {
   AppConfig,
   AutomationAction,
   DesktopDisplayInfo,
+  MinecraftAgentStarterConfig,
+  MinecraftAgentStarterConfigPatch,
+  MinecraftAgentStarterDiagnostic,
   MinecraftAgentStarterInfo,
   MinecraftAgentTaskRequest,
   OpenPathResult,
@@ -44,6 +50,7 @@ const PET_WINDOW_SIZE = { width: 520, height: 640 };
 const NORMAL_WINDOW_SIZE = { width: 1080, height: 740 };
 const HEARTBEAT_INTERVAL_MS = 60_000;
 const MINECRAFT_AGENT_STARTER_RELATIVE_DIR = path.join('integrations', 'minecraft-agent');
+const execFileAsync = promisify(execFile);
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let boundsBeforePetMode: Rectangle | null = null;
 let petModeActive = false;
@@ -60,6 +67,191 @@ type PetVisibleBounds = {
   right: number;
   bottom: number;
 };
+
+type MinecraftAgentStarterRoot = {
+  rootDir: string;
+  candidateRoots: string[];
+};
+
+type MinecraftAgentStarterConfigJson = {
+  bridge?: {
+    host?: unknown;
+    port?: unknown;
+  };
+  minecraft?: {
+    host?: unknown;
+    port?: unknown;
+    username?: unknown;
+    auth?: unknown;
+    version?: unknown;
+  };
+  behavior?: {
+    owner?: unknown;
+    followDistanceMin?: unknown;
+    followDistanceMax?: unknown;
+    regroupDistance?: unknown;
+    statusIntervalMs?: unknown;
+    maxDigBlocksPerTask?: unknown;
+    searchRadius?: unknown;
+  };
+  [key: string]: unknown;
+};
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function unpackedAppPath(appPath: string): string {
+  return appPath.endsWith(`${path.sep}app.asar`) ? appPath.slice(0, -'app.asar'.length) + 'app.asar.unpacked' : '';
+}
+
+function resolveMinecraftAgentStarterRoot(): MinecraftAgentStarterRoot {
+  const appPath = app.getAppPath();
+  const appUnpackedPath = unpackedAppPath(appPath);
+  const candidateRoots = uniqueStrings([
+    path.join(process.cwd(), MINECRAFT_AGENT_STARTER_RELATIVE_DIR),
+    appUnpackedPath ? path.join(appUnpackedPath, MINECRAFT_AGENT_STARTER_RELATIVE_DIR) : '',
+    path.join(appPath, MINECRAFT_AGENT_STARTER_RELATIVE_DIR),
+    process.resourcesPath ? path.join(process.resourcesPath, 'app.asar.unpacked', MINECRAFT_AGENT_STARTER_RELATIVE_DIR) : '',
+    process.resourcesPath ? path.join(process.resourcesPath, MINECRAFT_AGENT_STARTER_RELATIVE_DIR) : ''
+  ]);
+  const rootDir = candidateRoots.find((candidate) => existsSync(path.join(candidate, 'package.json'))) ?? candidateRoots[0];
+
+  return { rootDir, candidateRoots };
+}
+
+function numberFromUnknown(value: unknown, fallback: number, min = Number.MIN_SAFE_INTEGER, max = Number.MAX_SAFE_INTEGER): number {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(number)) {
+    return fallback;
+  }
+
+  return Math.max(min, Math.min(max, Math.round(number)));
+}
+
+function stringFromUnknown(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function starterBridgeUrl(host: string, port: number): string {
+  const cleanHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `ws://${cleanHost}:${port}`;
+}
+
+function normalizeMinecraftAgentStarterConfig(raw: MinecraftAgentStarterConfigJson): MinecraftAgentStarterConfig {
+  const bridgeHost = stringFromUnknown(raw.bridge?.host, '127.0.0.1');
+  const bridgePort = numberFromUnknown(raw.bridge?.port, 48909, 1, 65535);
+  const versionValue = raw.minecraft?.version;
+  const version = typeof versionValue === 'string' && versionValue.trim() ? versionValue.trim() : false;
+
+  return {
+    bridgeHost,
+    bridgePort,
+    bridgeUrl: starterBridgeUrl(bridgeHost, bridgePort),
+    minecraftHost: stringFromUnknown(raw.minecraft?.host, '127.0.0.1'),
+    minecraftPort: numberFromUnknown(raw.minecraft?.port, 55916, 1, 65535),
+    username: stringFromUnknown(raw.minecraft?.username, 'VirtualLoverBot'),
+    auth: stringFromUnknown(raw.minecraft?.auth, 'offline'),
+    version,
+    owner: stringFromUnknown(raw.behavior?.owner, ''),
+    followDistanceMin: numberFromUnknown(raw.behavior?.followDistanceMin, 3, 0, 20),
+    followDistanceMax: numberFromUnknown(raw.behavior?.followDistanceMax, 5, 1, 32),
+    regroupDistance: numberFromUnknown(raw.behavior?.regroupDistance, 8, 1, 64)
+  };
+}
+
+function applyMinecraftAgentStarterPatch(
+  config: MinecraftAgentStarterConfig,
+  patch: MinecraftAgentStarterConfigPatch
+): MinecraftAgentStarterConfig {
+  const bridgeHost = stringFromUnknown(patch.bridgeHost, config.bridgeHost);
+  const bridgePort = numberFromUnknown(patch.bridgePort, config.bridgePort, 1, 65535);
+  const version =
+    patch.version === undefined ? config.version : patch.version === false || patch.version === '' ? false : stringFromUnknown(patch.version, '');
+
+  return {
+    ...config,
+    bridgeHost,
+    bridgePort,
+    bridgeUrl: starterBridgeUrl(bridgeHost, bridgePort),
+    minecraftHost: stringFromUnknown(patch.minecraftHost, config.minecraftHost),
+    minecraftPort: numberFromUnknown(patch.minecraftPort, config.minecraftPort, 1, 65535),
+    username: stringFromUnknown(patch.username, config.username),
+    auth: stringFromUnknown(patch.auth, config.auth),
+    version,
+    owner: stringFromUnknown(patch.owner, config.owner),
+    followDistanceMin: numberFromUnknown(patch.followDistanceMin, config.followDistanceMin, 0, 20),
+    followDistanceMax: numberFromUnknown(patch.followDistanceMax, config.followDistanceMax, 1, 32),
+    regroupDistance: numberFromUnknown(patch.regroupDistance, config.regroupDistance, 1, 64)
+  };
+}
+
+function starterConfigToJson(config: MinecraftAgentStarterConfig, previous: MinecraftAgentStarterConfigJson = {}): MinecraftAgentStarterConfigJson {
+  return {
+    ...previous,
+    bridge: {
+      ...(previous.bridge ?? {}),
+      host: config.bridgeHost,
+      port: config.bridgePort
+    },
+    minecraft: {
+      ...(previous.minecraft ?? {}),
+      host: config.minecraftHost,
+      port: config.minecraftPort,
+      username: config.username,
+      auth: config.auth,
+      version: config.version || false
+    },
+    behavior: {
+      ...(previous.behavior ?? {}),
+      owner: config.owner,
+      followDistanceMin: config.followDistanceMin,
+      followDistanceMax: config.followDistanceMax,
+      regroupDistance: config.regroupDistance
+    }
+  };
+}
+
+async function readStarterConfigJson(configPath: string, examplePath: string): Promise<{
+  configExists: boolean;
+  raw: MinecraftAgentStarterConfigJson;
+  config: MinecraftAgentStarterConfig;
+  parseError?: string;
+}> {
+  const configExists = existsSync(configPath);
+  const sourcePath = configExists ? configPath : examplePath;
+
+  try {
+    const rawText = await readFile(sourcePath, 'utf8');
+    const raw = JSON.parse(rawText) as MinecraftAgentStarterConfigJson;
+    return {
+      configExists,
+      raw,
+      config: normalizeMinecraftAgentStarterConfig(raw)
+    };
+  } catch (error) {
+    const fallback = normalizeMinecraftAgentStarterConfig({});
+    return {
+      configExists,
+      raw: starterConfigToJson(fallback),
+      config: fallback,
+      parseError: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function commandVersion(command: string): Promise<string | undefined> {
+  try {
+    const { stdout } = await execFileAsync(command, ['--version'], {
+      timeout: 4000,
+      windowsHide: true,
+      shell: process.platform === 'win32'
+    });
+    return String(stdout).trim().split(/\r?\n/)[0] || undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 function normalizeExternalUrl(url: string): string | null {
   if (!url) return null;
@@ -78,18 +270,80 @@ function normalizeExternalUrl(url: string): string | null {
   return parsed.toString();
 }
 
-function minecraftAgentStarterInfo(): MinecraftAgentStarterInfo {
-  const candidateRoots = [
-    path.join(process.cwd(), MINECRAFT_AGENT_STARTER_RELATIVE_DIR),
-    path.join(app.getAppPath(), MINECRAFT_AGENT_STARTER_RELATIVE_DIR),
-    process.resourcesPath ? path.join(process.resourcesPath, MINECRAFT_AGENT_STARTER_RELATIVE_DIR) : ''
-  ].filter(Boolean);
-
-  const rootDir = candidateRoots.find((candidate) => existsSync(path.join(candidate, 'package.json'))) ?? candidateRoots[0];
+async function minecraftAgentStarterInfo(): Promise<MinecraftAgentStarterInfo> {
+  const { rootDir } = resolveMinecraftAgentStarterRoot();
   const startScript = path.join(rootDir, 'start-windows.cmd');
   const packageJson = path.join(rootDir, 'package.json');
   const readmePath = path.join(rootDir, 'README.md');
-  const available = existsSync(packageJson) && existsSync(startScript);
+  const configPath = path.join(rootDir, 'config.json');
+  const examplePath = path.join(rootDir, 'config.example.json');
+  const startScriptExists = existsSync(startScript);
+  const packageJsonExists = existsSync(packageJson);
+  const available = packageJsonExists && startScriptExists;
+  const nodeModulesInstalled =
+    existsSync(path.join(rootDir, 'node_modules', 'mineflayer', 'package.json')) &&
+    existsSync(path.join(rootDir, 'node_modules', 'ws', 'package.json'));
+  const [nodeVersion, npmVersion, appConfig, starterConfig] = await Promise.all([
+    commandVersion('node'),
+    commandVersion('npm'),
+    loadConfig().catch(() => null),
+    readStarterConfigJson(configPath, examplePath)
+  ]);
+  const diagnostics: MinecraftAgentStarterDiagnostic[] = [];
+
+  if (packageJsonExists) {
+    diagnostics.push({ level: 'ok', message: 'Minecraft Agent starter package is present.' });
+  } else {
+    diagnostics.push({ level: 'error', message: 'Minecraft Agent starter package is missing.' });
+  }
+
+  if (startScriptExists) {
+    diagnostics.push({ level: 'ok', message: 'Windows start script is present.' });
+  } else {
+    diagnostics.push({ level: 'error', message: 'start-windows.cmd is missing.' });
+  }
+
+  if (starterConfig.configExists) {
+    diagnostics.push({ level: 'ok', message: 'config.json is present.' });
+  } else {
+    diagnostics.push({ level: 'warn', message: 'config.json has not been created yet; generate it before joining a LAN world.' });
+  }
+
+  if (starterConfig.parseError) {
+    diagnostics.push({ level: 'error', message: `config.json could not be parsed: ${starterConfig.parseError}` });
+  }
+
+  if (nodeVersion) {
+    diagnostics.push({ level: 'ok', message: `Node.js available: ${nodeVersion}.` });
+  } else {
+    diagnostics.push({ level: 'error', message: 'Node.js was not found on PATH; npm start will not work from the starter script.' });
+  }
+
+  if (npmVersion) {
+    diagnostics.push({ level: 'ok', message: `npm available: ${npmVersion}.` });
+  } else {
+    diagnostics.push({ level: 'error', message: 'npm was not found on PATH; run Node.js installer or fix PATH before starting the agent.' });
+  }
+
+  if (nodeModulesInstalled) {
+    diagnostics.push({ level: 'ok', message: 'Minecraft Agent dependencies are installed.' });
+  } else {
+    diagnostics.push({ level: 'warn', message: 'Minecraft Agent dependencies are not installed yet; run npm install in the starter directory.' });
+  }
+
+  if (appConfig && starterConfig.config.bridgeUrl !== appConfig.agent.minecraftAgentWsUrl.trim()) {
+    diagnostics.push({
+      level: 'warn',
+      message: `App WS URL is ${appConfig.agent.minecraftAgentWsUrl}, but starter bridge is ${starterConfig.config.bridgeUrl}. Keep them the same.`
+    });
+  }
+
+  if (starterConfig.config.auth === 'offline') {
+    diagnostics.push({
+      level: 'warn',
+      message: 'Starter is using offline auth; this works only when the target LAN/server accepts offline players.'
+    });
+  }
 
   return {
     available,
@@ -97,10 +351,55 @@ function minecraftAgentStarterInfo(): MinecraftAgentStarterInfo {
     startScript,
     packageJson,
     readmePath,
+    configPath,
+    configExists: starterConfig.configExists,
+    startScriptExists,
+    nodeModulesInstalled,
+    nodeVersion,
+    npmVersion,
+    currentConfig: starterConfig.config,
+    diagnostics,
     installCommand: `cd /d "${rootDir}" && npm install`,
     startCommand: `cd /d "${rootDir}" && npm start`,
     error: available ? undefined : 'Bundled Minecraft Agent starter is missing.'
   };
+}
+
+async function saveMinecraftAgentStarterConfig(patch: MinecraftAgentStarterConfigPatch = {}): Promise<MinecraftAgentStarterInfo> {
+  const { rootDir } = resolveMinecraftAgentStarterRoot();
+  const configPath = path.join(rootDir, 'config.json');
+  const examplePath = path.join(rootDir, 'config.example.json');
+  const packageJson = path.join(rootDir, 'package.json');
+
+  if (!existsSync(packageJson)) {
+    return {
+      ...(await minecraftAgentStarterInfo()),
+      error: 'Bundled Minecraft Agent starter is missing; cannot save config.'
+    };
+  }
+
+  await mkdir(rootDir, { recursive: true });
+  if (!existsSync(configPath) && existsSync(examplePath)) {
+    await copyFile(examplePath, configPath);
+  }
+
+  const current = await readStarterConfigJson(configPath, examplePath);
+  const nextConfig = applyMinecraftAgentStarterPatch(current.config, patch);
+  const nextJson = starterConfigToJson(nextConfig, current.raw);
+  await writeFile(configPath, `${JSON.stringify(nextJson, null, 2)}\n`, 'utf8');
+
+  const appConfig = await loadConfig().catch(() => null);
+  if (appConfig && appConfig.agent.minecraftAgentWsUrl.trim() !== nextConfig.bridgeUrl) {
+    await saveConfig({
+      ...appConfig,
+      agent: {
+        ...appConfig.agent,
+        minecraftAgentWsUrl: nextConfig.bridgeUrl
+      }
+    }).catch(() => undefined);
+  }
+
+  return minecraftAgentStarterInfo();
 }
 
 function clampWindowValue(value: number, min: number, max: number): number {
@@ -588,6 +887,10 @@ ipcMain.handle('agent:tools:invoke', async (_event, call: AgentToolCall, approve
 });
 
 ipcMain.handle('minecraft:agentStarterInfo', async () => minecraftAgentStarterInfo());
+
+ipcMain.handle('minecraft:agentStarterConfig:save', async (_event, patch: MinecraftAgentStarterConfigPatch = {}) =>
+  saveMinecraftAgentStarterConfig(patch)
+);
 
 ipcMain.handle('minecraft:agentStatus', async () => {
   const config = await loadConfig();

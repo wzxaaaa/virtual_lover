@@ -132,12 +132,59 @@ export interface OpenPathResult {
   message: string;
 }
 
+export type MinecraftAgentStarterDiagnosticLevel = 'ok' | 'warn' | 'error';
+
+export interface MinecraftAgentStarterDiagnostic {
+  level: MinecraftAgentStarterDiagnosticLevel;
+  message: string;
+}
+
+export interface MinecraftAgentStarterConfig {
+  bridgeHost: string;
+  bridgePort: number;
+  bridgeUrl: string;
+  minecraftHost: string;
+  minecraftPort: number;
+  username: string;
+  auth: string;
+  version: string | false;
+  owner: string;
+  followDistanceMin: number;
+  followDistanceMax: number;
+  regroupDistance: number;
+}
+
+export type MinecraftAgentStarterConfigPatch = Partial<
+  Pick<
+    MinecraftAgentStarterConfig,
+    | 'bridgeHost'
+    | 'bridgePort'
+    | 'minecraftHost'
+    | 'minecraftPort'
+    | 'username'
+    | 'auth'
+    | 'version'
+    | 'owner'
+    | 'followDistanceMin'
+    | 'followDistanceMax'
+    | 'regroupDistance'
+  >
+>;
+
 export interface MinecraftAgentStarterInfo {
   available: boolean;
   rootDir: string;
   startScript: string;
   packageJson: string;
   readmePath: string;
+  configPath: string;
+  configExists: boolean;
+  startScriptExists: boolean;
+  nodeModulesInstalled: boolean;
+  nodeVersion?: string;
+  npmVersion?: string;
+  currentConfig?: MinecraftAgentStarterConfig;
+  diagnostics: MinecraftAgentStarterDiagnostic[];
   installCommand: string;
   startCommand: string;
   error?: string;

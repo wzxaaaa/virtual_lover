@@ -17,6 +17,7 @@ import {
   MemoryState,
   MinecraftAgentEvent,
   MinecraftAgentInventoryResponse,
+  MinecraftAgentStarterConfigPatch,
   MinecraftAgentStarterInfo,
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
@@ -100,6 +101,8 @@ const api = {
   listAgentTools: (): Promise<AgentToolDefinition[]> => ipcRenderer.invoke('agent:tools:list'),
   invokeAgentTool: (call: AgentToolCall, approved = false): Promise<AgentToolResult> => ipcRenderer.invoke('agent:tools:invoke', call, approved),
   getMinecraftAgentStarterInfo: (): Promise<MinecraftAgentStarterInfo> => ipcRenderer.invoke('minecraft:agentStarterInfo'),
+  saveMinecraftAgentStarterConfig: (patch: MinecraftAgentStarterConfigPatch): Promise<MinecraftAgentStarterInfo> =>
+    ipcRenderer.invoke('minecraft:agentStarterConfig:save', patch),
   getMinecraftAgentStatus: (): Promise<MinecraftAgentStatus> => ipcRenderer.invoke('minecraft:agentStatus'),
   sendMinecraftAgentTask: (request: MinecraftAgentTaskRequest): Promise<MinecraftAgentTaskResult> => ipcRenderer.invoke('minecraft:agentTask', request),
   queryMinecraftAgentInventory: (timeoutMs = 2000): Promise<MinecraftAgentInventoryResponse> => ipcRenderer.invoke('minecraft:agentInventory', timeoutMs),

@@ -209,8 +209,9 @@
 - `P17` 已补第二十四段 mc-agent 协作协议确认：保持 `github_girl` 旧协议向后兼容，不强制外部 agent 必须实现新握手；同时本项目新增 `MinecraftAgentProtocolState`，能识别外部 agent 发来的 `hello/agent_hello/capabilities/agent_capabilities/protocol` 帧，也会从 `agent_status`、聊天和 task_id echo 中推断已支持能力。`MinecraftAgentStatus.protocol` 现在包含客户端协议版本、agent 名称/版本/协议版本、已确认能力、仍缺能力和协作 contract；LLM Minecraft 视角与游戏同伴 prompt 会看到这些信息。出站 `task` 帧新增 `client` 元数据，携带 `virtual-lover-mc-agent/1`、客户端能力列表和协作 contract（跟随 3-5 格、超过 8 格找回/等待、不挡路、不挖用户脚下、不抢资源、共享箱子只处理富余物品），旧 agent 可忽略，新 agent 可据此实现物理层协作。服务级 smoke 和协议 smoke 都已覆盖 task frame contract 与 agent 能力声明。适配点：这仍不是内置 mineflayer 机器人本体；它把双方协议边界钉住，方便后续实现/替换外部 mc-agent。
 - `P17` 已补第二十五段 Electron renderer IPC/preload smoke：新增 `scripts/smoke-minecraft-renderer.mjs` 和 `npm run smoke:minecraft-agent:renderer`，脚本会临时 bundle 真实 `MinecraftAgentService` 与真实 `src/preload/preload.ts`，再启动一个隐藏 Electron renderer，通过 `window.lover.getMinecraftAgentStatus()`、`window.lover.invokeAgentTool(plugin.query_inventory/plugin.minecraft_task)` 和 `window.lover.onMinecraftAgentEvent()` 验证 Minecraft 状态、背包、任务派发、`protocol` 事件、`taskFinished` 事件和 DOM 事件流都能从 mock mc-agent 一路穿过主进程 IPC/preload 到 renderer。mock 还会断言出站 task frame 保留 `virtual-lover-mc-agent/1` 客户端协议元数据和协作 contract。适配点：这不是完整聊天 UI 视觉 E2E，也没有连接真实 Minecraft/mineflayer；但它已经把 Electron renderer 依赖的关键桥打通，后续 UI 改动或 preload 断链会被稳定回归抓住。
 - `P17` 已补第二十六段内置 mineflayer starter：`github_girl` 原项目没有把 mc-agent 二进制打进插件，而是通过 quickstart 指向外部分发包；本项目在保持该下载路径的同时新增 `integrations/minecraft-agent` 独立 Node 包，内含 `mineflayer`/`mineflayer-pathfinder` starter、`config.example.json`、`start-windows.cmd` 和 README。该 starter 默认监听 `ws://127.0.0.1:48909`，向本应用声明 `virtual-lover-mc-agent/1`、回传 `agent_status/inventory/chat/log/alert/task_finished`，并能执行基础物理任务：跟随/靠近玩家、停止、查背包、游戏内发言、挖附近木头或常见矿物、攻击附近敌对生物、吃食物。主进程新增 `minecraft:agentStarterInfo` IPC，preload 暴露 `getMinecraftAgentStarterInfo()`，市场 Minecraft Agent 配置页会显示本地 starter 绝对路径、安装/启动命令，并提供“打开本地 starter”和默认启动内置 `start-windows.cmd` 的入口；根 `package.json` 新增 `minecraft-agent:install/start/check` 快捷命令。适配点：这仍不是 `github_girl` 外部分发的完整 mindserver/mc-agent 管理面板，也没有真实渲染截图、容器锁、复杂建造和长期规划；但第二账号身体已经从“只给下载链接”推进到“项目内可运行 starter + 协议骨架”。
+- `P17` 已补第二十七段 starter 管理/诊断/配置保存：继续沿 `github_girl` quickstart 管理面板思路，把本项目内置 `integrations/minecraft-agent` 从“有脚本可打开”推进到“市场里能诊断和写配置”。主进程 `minecraft:agentStarterInfo` 现在会检测 unpack 后 starter 路径、`start-windows.cmd`、`config.json`、`node_modules`、Node/npm PATH、当前 starter bridge URL 与应用 WS URL 是否一致，并返回结构化 diagnostics；新增 `minecraft:agentStarterConfig:save`，可生成 `config.json`、写入 MC host/LAN port/bot username/auth/owner/bridge port，并自动同步应用 `minecraftAgentWsUrl`。市场 Minecraft Agent 配置页新增 starter 表单、刷新诊断、生成默认配置、保存 starter 配置按钮；打包配置加入 `asarUnpack` 和 starter lockfile，避免正式包里脚本被塞进 asar 之后无法直接运行。适配点：仍未做到自动读取 Minecraft 聊天里的 LAN 端口，也还没有真正启动外部进程并捕获 stdout/stderr；但用户手动 LAN 联机前的端口/依赖/配置错误已经能在应用里定位。
 
-当前进度估算：整体迁移约 69%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 91%。
+当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 92%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -227,19 +228,19 @@
 
 ### Minecraft 还差什么
 
-1. **mc-agent 身体已有项目内 starter，但仍需真实联机打磨**：当前应用负责对话、视觉、任务下发；本轮新增 `integrations/minecraft-agent` mineflayer starter，可控制第二账号做基础移动/挖掘/聊天/背包/战斗动作。还缺 `github_girl` 外部分发包里的完整 mindserver 管理面板、二进制版本管理、自动配置 LAN 端口、截图流、复杂建造、容器锁和真实联机压力测试。
+1. **mc-agent 身体已有项目内 starter，但仍需真实联机打磨**：当前应用负责对话、视觉、任务下发；本轮新增 `integrations/minecraft-agent` mineflayer starter，可控制第二账号做基础移动/挖掘/聊天/背包/战斗动作，也已能在市场中生成/保存 config、诊断 Node/npm/依赖/WS 配置。还缺 `github_girl` 外部分发包里的完整 mindserver 管理面板、二进制版本管理、自动识别 Minecraft LAN 端口、截图流、复杂建造、容器锁和真实联机压力测试。
 2. **message-plane 未补导致 general read-only 状态注入没原样迁**：`github_girl` 能把日志/截图作为 `read` 上下文静默塞给模型；本项目目前只迁了任务完成、危险、执行中、空闲续玩这些会触发判断的 cue。要原样迁，需要先补 message-plane。
 3. **更丰富的游戏状态**：已能接住并入模血量、饥饿、坐标、朝向、维度、生物群系、装备、手持物、附近实体、用户/队友位置、附近玩家、方块/目标、路径状态、危险等级、共享容器、方块交互进度、最近游戏聊天、协议能力声明等常见状态；还缺更稳定的用户身份映射、用户视线方向语义、容器锁/物品预定等协作 ground truth，需要外部 mc-agent 真正按 `virtual-lover-mc-agent/1` 输出。
 4. **长期目标规划**：已有 `activeGoal` 和 `planState` 保存这一局持续目标、当前步骤、最近步骤、连续受阻次数，并进入空闲续玩判断；状态层也能接住路径/目标/危险反馈。还缺真正的多阶段 plan 生成、checkpoint 持久化、失败恢复策略和资源预算。
 5. **多玩家协作语义**：已补跟随半径、别挡路、保护、带路、等待、分工采集、共享箱子等任务/prompt/status 规则，并通过 task frame `client.collaboration` 把 contract 明确传给外部 agent；还缺外部 mc-agent 真实物理层的“不挡路”寻路策略、共享容器锁/物品预定、稳定用户身份映射和基于用户视线方向的协作细节。
 6. **游戏内自然沟通**：已补基础聊天桥，能缓存游戏聊天并通过 `plugin.minecraft_chat` 向外部 mc-agent 发送短句；还缺外部 mc-agent 对聊天帧的稳定协议确认、游戏内用户身份映射，以及把游戏内聊天和桌面对话做更完整的去重/合并。
-7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。
+7. **启动与连接自动化**：市场里已有下载、路径、管理面板、本地 starter 诊断和配置保存入口，但还不能自动识别 Minecraft LAN 端口、自动安装依赖/启动进程、捕获启动日志、自动确认 bot 已进世界。
 8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；也已有主进程服务级 smoke 覆盖 live inventory、busy、overwrite 防抖、匹配完成、聊天、断线和事件回流；本轮新增 Electron renderer IPC/preload smoke，能验证 renderer 通过 `window.lover` 拿到状态、协议、背包、任务与事件。还缺完整聊天 UI 视觉 E2E，以及接真实 Minecraft/mineflayer 的联机回放。
 
 ### 下一步建议顺序
 
 1. 先做 **mc-agent starter 真实联机回放**：在本地 Minecraft LAN 世界里跑 `integrations/minecraft-agent`，补 smoke/诊断日志，确认第二账号能稳定进世界、跟随、挖木头、聊天、回传背包和状态。
-2. 再补 **mc-agent 管理/自动配置**：自动复制 config、识别/填写 LAN 端口、检测 Node/npm/依赖安装、把常见启动错误显示到市场面板。
+2. 再补 **mc-agent 进程管理/日志回流**：一键 npm install、启动/停止 starter、捕获 stdout/stderr、把常见启动错误和 bot 进服状态显示到市场面板。
 3. 再补 **完整聊天 UI 视觉 E2E**，验证真实 App 聊天窗口里 Minecraft 状态、任务、协议能力和事件能完整显示。
 4. 然后做 **全局 message-plane**，让 Minecraft 和其他 Agent 能共享 `read/respond`、priority、coalesce。
 5. 最后再拆 **独立 Agent 服务 + 任务系统**，这是大工程，应该在 Minecraft 核心稳定后动。
