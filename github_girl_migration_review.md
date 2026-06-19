@@ -188,8 +188,9 @@
 - `P17` 已补齐 Minecraft 陪玩第三段工具闭环：按 `github_girl` `game_agent_minecraft.__init__.py` 的 fire-and-forget 语义，将 `plugin.minecraft_task` 改为立即派发、后台等待 `task_finished`，任务完成后通过现有 `minecraft:agentEvent` 回流一条自然完成提示；新增 `plugin.game_agent_status`，并让市场里声明的 `game_agent_status` 能真正调用。前端新增 reactive 文本派发：用户直接说“帮我砍树 / 查背包 / 状态怎么样 / 停一下 / 找钻石 / 回家 / 跟着我”等，会自动开启 Minecraft 陪玩并调用对应 MCP 工具，不再依赖按钮。LLM 元数据新增 `toolCalls` 协议，仅在 Minecraft 陪玩启用时允许模型自动调用 `plugin.minecraft_task` / `plugin.query_inventory` / `plugin.game_agent_status`，并按 `github_girl` 提示词约束不把“工具/连接/minecraft_task/tool”等内部词说给用户。适配点：仍未迁入 `github_girl` 完整 plugin SDK message plane，本项目用 `AgentTurnResponse.toolCalls + preload invokeAgentTool` 承接同等能力。
 - `P17` 已迁入 Minecraft 陪玩第四段外部身体引导：照抄 `github_girl` `plugin/plugins/game_agent_minecraft/surfaces/quickstart.tsx` 的 mc-agent 下载/启动/管理面板思路，在市场 `Minecraft Agent` MCP 配置里加入连接状态刷新、`http://localhost:8765` 管理面板、`ws://localhost:48909` 桥接地址、`启动mc-agent.bat` 本地脚本入口、夸克/Google Drive/百度网盘下载入口和完整 LAN 联机步骤。关键说明同步到 UI：mc-agent 才是她在 Minecraft 里的“身体”，需要独立 Minecraft 账号进入同一个 LAN 世界；当前应用负责对话、观察与任务下发。适配点：`github_girl` 本身也不内置 mc-agent 二进制/源码，而是要求用户下载外部包运行，所以本项目先按原逻辑迁入口，不把大型外部 agent 打进 Electron 包。
 - `P17` 已补第五段稳定性和中文意图：修复 Minecraft 陪玩文本意图、状态 prompt 和任务 preset 的中文匹配，覆盖“她能不能动/能控制吗/帮我找铁/收集煤/做火把/整理背包”等更贴近实际游戏的说法；前端 Minecraft 状态/任务回复改为明确区分“已作为第二玩家进世界”和“还没启动 mc-agent，只能看屏幕陪玩”，避免误导用户以为她已经能控制角色。同时新增 React 根级 ErrorBoundary 和 mc-agent 启动入口异常兜底，降低市场面板或 preload 版本不一致导致窗口白屏/崩溃的风险。
+- `P17` 已补第六段任务回包安全路由：按 `github_girl` `game_agent_minecraft` 插件测试里的 task_id 规则，主进程保留最近 32 个已下发任务，见过 task_id 回显后启用现代协议保护；未知 task_id 的 `task_finished` 只记日志和状态，不会完成当前 pending，也不会污染背包；历史 task_id 的迟到完成会作为回顾事件发出，不打断当前任务；无 task_id 的旧式完成包只在还没见过现代回显前走 FIFO 兜底，stop/reconnect 会重置 latch。这样 Minecraft Agent 后续多任务、迟到包、重复包更接近 `github_girl` 的行为。
 
-当前进度估算：整体迁移约 57%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 90%，完整游戏 Agent 自主玩法约 54%。
+当前进度估算：整体迁移约 58%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 92%，完整游戏 Agent 自主玩法约 56%。
 
 ## 文件域审阅摘要
 

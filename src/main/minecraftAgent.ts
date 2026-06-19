@@ -1,5 +1,5 @@
-import { EventEmitter } from 'node:events';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import type {
   AppConfig,
   MinecraftAgentEvent,
@@ -23,11 +23,14 @@ type InventoryWaiter = {
   resolve: (response: MinecraftAgentInventoryResponse) => void;
 };
 
+type TaskFinishedBucket = 'current' | 'fifo' | 'retroactive' | 'unknown' | 'stray';
+
 const DEFAULT_WS_URL = 'ws://localhost:48909';
 const CONNECT_WAIT_MS = 3000;
 const RECONNECT_INTERVAL_MS = 5000;
 const LOG_CACHE_LIMIT = 200;
 const SCREENSHOT_CACHE_LIMIT = 3;
+const DISPATCH_HISTORY_LIMIT = 32;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -154,6 +157,8 @@ class MinecraftAgentService {
   private lastInventoryAt = 0;
   private lastError: string | null = null;
   private inventoryWaiters: InventoryWaiter[] = [];
+  private dispatchedHistory = new Map<string, string>();
+  private seenTaskIdEcho = false;
   private readonly events = new EventEmitter();
 
   onEvent(listener: (event: MinecraftAgentEvent) => void): () => void {
@@ -184,6 +189,8 @@ class MinecraftAgentService {
       summary: 'Minecraft Agent 已停止。'
     });
     this.resolveInventoryWaiters('none', 'Minecraft Agent 已停止。');
+    this.dispatchedHistory.clear();
+    this.seenTaskIdEcho = false;
 
     const socket = this.socket;
     this.socket = null;
@@ -244,13 +251,7 @@ class MinecraftAgentService {
     }
 
     if (this.pendingTask && request.overwrite !== true) {
-      return {
-        ok: false,
-        status: 'busy',
-        query: this.pendingTask.taskText,
-        taskId: this.pendingTask.taskId,
-        summary: `Minecraft 角色还在执行：${this.pendingTask.taskText}`
-      };
+      return this.busyResult();
     }
 
     if (this.pendingTask && request.overwrite === true) {
@@ -271,22 +272,12 @@ class MinecraftAgentService {
         taskText,
         taskId,
         startedAt: Date.now(),
-        timeout: setTimeout(() => {
-          if (this.pendingTask?.taskId === taskId) {
-            this.resolvePending({
-              ok: false,
-              status: 'timeout',
-              query: taskText,
-              taskId,
-              summary: `Minecraft 动作超时：${taskText}`
-            });
-          }
-        }, timeoutMs),
+        timeout: this.createTaskTimeout(taskText, taskId, timeoutMs),
         resolve
       };
 
       this.pendingTask = pending;
-      const sent = this.sendJson({ type: 'task', task: taskText, task_id: taskId });
+      const sent = this.sendTaskFrame(taskText, taskId);
       if (!sent) {
         this.resolvePending({
           ok: false,
@@ -324,13 +315,7 @@ class MinecraftAgentService {
     }
 
     if (this.pendingTask && request.overwrite !== true) {
-      return {
-        ok: false,
-        status: 'busy',
-        query: this.pendingTask.taskText,
-        taskId: this.pendingTask.taskId,
-        summary: `Minecraft 角色还在执行：${this.pendingTask.taskText}`
-      };
+      return this.busyResult();
     }
 
     if (this.pendingTask && request.overwrite === true) {
@@ -349,22 +334,12 @@ class MinecraftAgentService {
       taskText,
       taskId,
       startedAt: Date.now(),
-      timeout: setTimeout(() => {
-        if (this.pendingTask?.taskId === taskId) {
-          this.resolvePending({
-            ok: false,
-            status: 'timeout',
-            query: taskText,
-            taskId,
-            summary: `Minecraft 动作超时：${taskText}`
-          });
-        }
-      }, timeoutMs),
+      timeout: this.createTaskTimeout(taskText, taskId, timeoutMs),
       resolve: () => undefined
     };
 
     this.pendingTask = pending;
-    const sent = this.sendJson({ type: 'task', task: taskText, task_id: taskId });
+    const sent = this.sendTaskFrame(taskText, taskId);
     if (!sent) {
       const result: MinecraftAgentTaskResult = {
         ok: false,
@@ -409,6 +384,50 @@ class MinecraftAgentService {
     }
 
     return this.cachedInventoryResponse(this.lastInventoryAt > 0 ? 'cached' : 'none', this.lastError ?? 'Minecraft Agent 未连接。');
+  }
+
+  private busyResult(): MinecraftAgentTaskResult {
+    const pending = this.pendingTask;
+    return {
+      ok: false,
+      status: 'busy',
+      query: pending?.taskText ?? '',
+      taskId: pending?.taskId,
+      summary: pending ? `Minecraft 角色还在执行：${pending.taskText}` : 'Minecraft 角色还在执行上一项任务。'
+    };
+  }
+
+  private createTaskTimeout(taskText: string, taskId: string, timeoutMs: number): ReturnType<typeof setTimeout> {
+    return setTimeout(() => {
+      if (this.pendingTask?.taskId === taskId) {
+        this.resolvePending({
+          ok: false,
+          status: 'timeout',
+          query: taskText,
+          taskId,
+          summary: `Minecraft 动作超时：${taskText}`
+        });
+      }
+    }, timeoutMs);
+  }
+
+  private sendTaskFrame(taskText: string, taskId: string): boolean {
+    const sent = this.sendJson({ type: 'task', task: taskText, task_id: taskId });
+    if (sent) {
+      this.rememberDispatchedTask(taskId, taskText);
+    }
+    return sent;
+  }
+
+  private rememberDispatchedTask(taskId: string, taskText: string): void {
+    this.dispatchedHistory.set(taskId, taskText);
+    while (this.dispatchedHistory.size > DISPATCH_HISTORY_LIMIT) {
+      const oldestKey = this.dispatchedHistory.keys().next().value;
+      if (typeof oldestKey !== 'string') {
+        break;
+      }
+      this.dispatchedHistory.delete(oldestKey);
+    }
   }
 
   private openSocket(): void {
@@ -574,6 +593,7 @@ class MinecraftAgentService {
       const text = stringOrEmpty(frame.text) || stringOrEmpty(frame.message);
       if (text) {
         this.pushLog(text);
+        this.events.emit('event', { type: 'log', text } satisfies MinecraftAgentEvent);
       }
       return;
     }
@@ -583,47 +603,77 @@ class MinecraftAgentService {
     }
   }
 
+  private classifyTaskFinished(taskId: string, pending: PendingTask | null): { bucket: TaskFinishedBucket; historicalTaskText?: string } {
+    const historicalTaskText = taskId ? this.dispatchedHistory.get(taskId) : undefined;
+    if (taskId && (pending?.taskId === taskId || historicalTaskText)) {
+      this.seenTaskIdEcho = true;
+    }
+
+    if (pending) {
+      if (taskId) {
+        if (pending.taskId === taskId) {
+          return { bucket: 'current' };
+        }
+
+        if (historicalTaskText) {
+          return { bucket: 'retroactive', historicalTaskText };
+        }
+
+        return { bucket: 'unknown' };
+      }
+
+      return { bucket: this.seenTaskIdEcho ? 'stray' : 'fifo' };
+    }
+
+    if (taskId && historicalTaskText) {
+      return { bucket: 'retroactive', historicalTaskText };
+    }
+
+    return { bucket: 'stray' };
+  }
+
   private handleTaskFinished(frame: Record<string, unknown>): void {
     const text = stringOrEmpty(frame.text) || stringOrEmpty(frame.message);
-    if (text) {
-      this.pushLog(text);
+    const pending = this.pendingTask;
+    const taskId = stringOrEmpty(frame.task_id) || stringOrEmpty(frame.taskId);
+    const { bucket, historicalTaskText } = this.classifyTaskFinished(taskId, pending);
+
+    if (bucket === 'unknown' || bucket === 'stray') {
+      if (text) {
+        this.pushLog(text);
+      }
+      this.emitStatus();
+      return;
     }
 
     const inventory = normalizeInventory(frame.inventory ?? frame.items);
     if (inventory) {
       this.updateInventory(inventory);
     }
-
-    const pending = this.pendingTask;
-    const taskId = stringOrEmpty(frame.task_id) || stringOrEmpty(frame.taskId);
-    if (!pending) {
-      this.emitStatus();
-      return;
-    }
-
-    if (taskId && pending.taskId !== taskId) {
-      this.emitStatus();
-      return;
+    if (text) {
+      this.pushLog(text);
     }
 
     const status = normalizeTaskStatus(frame.status, text);
-    this.resolvePending({
+    const taskText = bucket === 'retroactive' ? historicalTaskText ?? '(unknown Minecraft task)' : pending?.taskText ?? '(unknown Minecraft task)';
+    const result: MinecraftAgentTaskResult = {
       ok: status === 'ok',
       status,
-      query: pending.taskText,
-      taskId: pending.taskId,
+      query: taskText,
+      taskId: taskId || pending?.taskId,
       text,
       inventory: inventory ?? { ...this.lastInventory },
-      summary: taskSummary({
-        ok: status === 'ok',
-        status,
-        query: pending.taskText,
-        taskId: pending.taskId,
-        text,
-        inventory: inventory ?? { ...this.lastInventory },
-        summary: ''
-      })
-    });
+      summary: ''
+    };
+    result.summary = taskSummary(result);
+
+    if ((bucket === 'current' || bucket === 'fifo') && pending) {
+      this.resolvePending(result);
+      return;
+    }
+
+    this.events.emit('event', { type: 'taskFinished', result } satisfies MinecraftAgentEvent);
+    this.emitStatus();
   }
 
   private pushLog(text: string): void {
