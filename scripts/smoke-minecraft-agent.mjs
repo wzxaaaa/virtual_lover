@@ -6,7 +6,7 @@ import path from 'node:path';
 const DEFAULT_WS_URL = process.env.MC_AGENT_WS || process.env.NEKO_GAME_AGENT_WS || 'ws://localhost:48909';
 const DEFAULT_TASK = 'look around briefly, then stop somewhere safe';
 const SOCKET_OPEN = 1;
-const MOCK_SCENARIOS = new Set(['normal', 'stale-task-id']);
+const MOCK_SCENARIOS = new Set(['normal', 'stale-task-id', 'rich-state', 'blocked-task', 'chat']);
 
 function usage() {
   console.log(`Minecraft Agent smoke test
@@ -17,11 +17,13 @@ Usage:
   npm run smoke:minecraft-agent -- --ws ws://localhost:48909 --timeout 120 --dump-dir .tmp/mc-smoke
   npm run smoke:minecraft-agent -- --mock --timeout 5
   npm run smoke:minecraft-agent -- --mock --scenario stale-task-id --timeout 5
+  npm run smoke:minecraft-agent -- --mock --scenario rich-state --chat "I am with you" --timeout 5
 
 Options:
   --ws <url>                  mc-agent WebSocket URL. Default: ${DEFAULT_WS_URL}
   --mock                      start an in-process mock mc-agent and run the smoke against it
-  --scenario <name>           mock scenario: normal, stale-task-id. Default: normal
+  --scenario <name>           mock scenario: normal, stale-task-id, rich-state, blocked-task, chat. Default: normal
+  --chat <text>               send one in-game chat frame after inventory query
   --timeout <seconds>         task_finished wait timeout. Default: 90
   --connect-timeout <seconds> connection timeout. Default: 5
   --inventory-timeout <sec>   inventory wait window before task send. Default: 2
@@ -41,7 +43,8 @@ function parseArgs(argv) {
     dumpDir: '',
     statusOnly: false,
     mock: false,
-    scenario: 'normal'
+    scenario: 'normal',
+    chat: ''
   };
   const positional = [];
 
@@ -61,6 +64,10 @@ function parseArgs(argv) {
     }
     if (arg === '--scenario') {
       options.scenario = argv[++index] || options.scenario;
+      continue;
+    }
+    if (arg === '--chat') {
+      options.chat = argv[++index] || '';
       continue;
     }
     if (arg === '--timeout') {
@@ -368,6 +375,54 @@ function mockScreenshotBase64() {
   return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 }
 
+function mockRichStatusFrame(scenario) {
+  return {
+    type: 'agent_status',
+    connected: true,
+    mock: true,
+    scenario,
+    health: 17,
+    maxHealth: 20,
+    food: 15,
+    dimension: 'overworld',
+    biome: 'plains',
+    position: { x: 120.5, y: 64, z: -35.25, yaw: 90, pitch: 4 },
+    selectedItem: 'iron_pickaxe',
+    equipment: { mainHand: 'iron_pickaxe', chest: 'iron_chestplate' },
+    nearbyEntities: ['cow', 'zombie'],
+    trackedPlayer: {
+      name: 'player',
+      distance: 6.2,
+      position: { x: 116, y: 64, z: -33 },
+      selectedItem: 'torch'
+    },
+    nearbyPlayers: [
+      {
+        name: 'player',
+        distance: 6.2,
+        position: { x: 116, y: 64, z: -33 }
+      }
+    ],
+    path: {
+      status: 'moving',
+      distance: 18.5,
+      progress: 0.42,
+      target: {
+        kind: 'block',
+        block: 'oak_log',
+        distance: 18.5,
+        position: { x: 138, y: 64, z: -31 }
+      }
+    },
+    danger: {
+      level: 'medium',
+      causes: ['nearby hostile mob'],
+      nearbyHostiles: ['zombie']
+    },
+    inventory: { oak_log: 3, bread: 2, torch: 8 }
+  };
+}
+
 function startMockMinecraftAgentServer({ scenario = 'normal' } = {}) {
   const sockets = new Set();
   const received = [];
@@ -405,8 +460,17 @@ function startMockMinecraftAgentServer({ scenario = 'normal' } = {}) {
         );
         handshaken = true;
         pending = pending.subarray(Buffer.byteLength(request.slice(0, endIndex + 4)));
-        sendMockFrame(socket, { type: 'agent_status', connected: true, mock: true, scenario });
+        sendMockFrame(socket, scenario === 'rich-state' ? mockRichStatusFrame(scenario) : { type: 'agent_status', connected: true, mock: true, scenario });
         sendMockFrame(socket, { type: 'log', text: 'mock mc-agent ready' });
+        if (scenario === 'rich-state') {
+          sendMockFrame(socket, { type: 'chat', sender: 'player', role: 'player', text: 'Can you follow me?' });
+          sendMockFrame(socket, {
+            type: 'alert',
+            severity: 'warn',
+            text: 'Zombie nearby',
+            cause: { entity: 'zombie', distance: 8 }
+          });
+        }
       }
 
       const decoded = decodeWebSocketFrames(pending);
@@ -434,11 +498,20 @@ function startMockMinecraftAgentServer({ scenario = 'normal' } = {}) {
           continue;
         }
 
+        if (frame.type === 'chat') {
+          const text = typeof frame.text === 'string' ? frame.text : typeof frame.message === 'string' ? frame.message : '';
+          sendMockFrame(socket, { type: 'chat', sender: 'bot', role: 'bot', outgoing: true, text });
+          continue;
+        }
+
         if (frame.type === 'task') {
           const taskText = typeof frame.task === 'string' ? frame.task : '';
           const taskId = typeof frame.task_id === 'string' ? frame.task_id : typeof frame.taskId === 'string' ? frame.taskId : '';
           sendMockFrame(socket, { type: 'log', text: `mock accepted task: ${taskText}` });
           sendMockFrame(socket, { type: 'screenshot', image: mockScreenshotBase64(), encoding: 'png' });
+          if (scenario === 'rich-state') {
+            sendMockFrame(socket, mockRichStatusFrame(scenario));
+          }
           if (scenario === 'stale-task-id') {
             setTimeout(() => {
               if (!socket.destroyed) {
@@ -456,7 +529,10 @@ function startMockMinecraftAgentServer({ scenario = 'normal' } = {}) {
               sendMockFrame(socket, {
                 type: 'task_finished',
                 status: 'ok',
-                text: `mock completed: ${taskText}`,
+                text:
+                  scenario === 'blocked-task'
+                    ? `mock could not complete: no path to target for ${taskText}`
+                    : `mock completed: ${taskText}`,
                 task_id: taskId
               });
             }
@@ -538,6 +614,10 @@ function summarizeInventory(frame) {
   return items.length > 0 ? items.join(', ') : 'empty';
 }
 
+function looksBlocked(text) {
+  return /not found|could not|couldn't|unable|failed|no path|blocked|missing|cannot|can't|unavailable|no target|target not/i.test(text);
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   if (options.scenario !== 'normal' && !options.mock) {
@@ -559,11 +639,15 @@ async function main() {
     task_finished: 0,
     inventory: 0,
     agent_status: 0,
+    chat: 0,
     alert: 0,
     other: 0
   };
   const screenshots = [];
   let latestInventory = null;
+  let latestAgentStatus = null;
+  let latestChat = null;
+  let latestAlert = null;
   let finished = null;
   let sawTaskIdEcho = false;
   let ignoredTaskFinished = 0;
@@ -604,6 +688,20 @@ async function main() {
         console.log(`[mc-smoke] inventory: ${summarizeInventory(frame)}`);
       }
 
+      if (type === 'agent_status') {
+        latestAgentStatus = frame;
+        const position = frame.position || frame.pos || frame.location || null;
+        const place = [frame.dimension || frame.world, frame.biome].filter(Boolean).join('/');
+        console.log(
+          `[mc-smoke] agent_status${place ? ` place=${place}` : ''}${position ? ` pos=${JSON.stringify(position)}` : ''}`
+        );
+      }
+
+      if (type === 'chat') {
+        latestChat = frame;
+        console.log(`[mc-smoke] chat: ${frame.sender || frame.role || 'unknown'} ${frame.text || frame.message || ''}`);
+      }
+
       if (type === 'screenshot') {
         const file = await dumpScreenshot(frame, options.dumpDir, screenshots.length);
         screenshots.push(file || '<received>');
@@ -611,6 +709,7 @@ async function main() {
       }
 
       if (type === 'alert') {
+        latestAlert = frame;
         console.log(`[mc-smoke] alert: ${frame.severity || 'warn'} ${frame.text || frame.message || ''}`);
       }
 
@@ -640,6 +739,13 @@ async function main() {
       await wait(options.inventoryTimeoutMs);
     }
 
+    const chatText = options.chat || (options.mock && options.scenario === 'chat' ? 'Hello from smoke' : '');
+    if (chatText) {
+      console.log(`[mc-smoke] chat send=${chatText}`);
+      sendJson(socket, { type: 'chat', text: chatText, message: chatText });
+      await wait(150);
+    }
+
     if (!options.statusOnly) {
       console.log(`[mc-smoke] task_id=${taskId}`);
       console.log(`[mc-smoke] task=${options.task}`);
@@ -661,6 +767,16 @@ async function main() {
     counts,
     scenario: options.mock ? options.scenario : 'real-agent',
     inventory: latestInventory ? summarizeInventory(latestInventory) : 'not received',
+    richStatus: latestAgentStatus
+      ? {
+          health: latestAgentStatus.health ?? latestAgentStatus.hp ?? null,
+          dimension: latestAgentStatus.dimension || latestAgentStatus.world || '',
+          hasPath: Boolean(latestAgentStatus.path || latestAgentStatus.pathState || latestAgentStatus.pathfinding),
+          hasDanger: Boolean(latestAgentStatus.danger || latestAgentStatus.risk || latestAgentStatus.threat)
+        }
+      : null,
+    chat: latestChat ? String(latestChat.text || latestChat.message || '').slice(0, 160) : '',
+    alert: latestAlert ? String(latestAlert.text || latestAlert.message || '').slice(0, 160) : '',
     screenshots: screenshots.length,
     taskIdEcho: sawTaskIdEcho,
     ignoredTaskFinished,
@@ -680,6 +796,37 @@ async function main() {
   if (!finished) {
     console.error(`[mc-smoke] task_finished was not received within ${Math.round(options.timeoutMs / 1000)}s`);
     return 3;
+  }
+
+  if (options.mock && options.scenario === 'rich-state') {
+    const hasRichStatus = latestAgentStatus && latestAgentStatus.path && latestAgentStatus.danger && latestAgentStatus.trackedPlayer;
+    if (!hasRichStatus) {
+      console.error('[mc-smoke] rich-state scenario did not receive path/danger/trackedPlayer status');
+      return 4;
+    }
+    if (!latestChat) {
+      console.error('[mc-smoke] rich-state scenario did not receive chat frame');
+      return 5;
+    }
+    if (!latestAlert) {
+      console.error('[mc-smoke] rich-state scenario did not receive alert frame');
+      return 6;
+    }
+  }
+
+  if (options.mock && options.scenario === 'blocked-task') {
+    const text = String(finished.text || finished.message || '');
+    if (!looksBlocked(text)) {
+      console.error('[mc-smoke] blocked-task scenario did not produce blocked marker text');
+      return 7;
+    }
+  }
+
+  if ((options.mock && options.scenario === 'chat') || options.chat) {
+    if (!latestChat) {
+      console.error('[mc-smoke] chat frame was not received');
+      return 8;
+    }
   }
 
   return 0;

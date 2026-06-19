@@ -203,8 +203,9 @@
 - `P17` 已补第十八段路径/危险/目标状态：继续沿 `github_girl` blocked marker、damage-cause hint 和 pathfinding 长耗时保护方向，`agent_status` 现在会宽松解析 `path/pathState/pathfinding/navigation/route`、`target/currentTarget/destination/blockTarget`、`danger/risk/threat/hazard/hostiles`，规范成 `MinecraftAgentPathState`、`MinecraftAgentTargetState`、`MinecraftAgentDangerState`。LLM Minecraft 视角、状态工具和前端状态回复都会看到“路径是否卡住、目标坐标/距离、受阻物、危险等级/原因/敌对实体、低血量风险”。适配点：这不是本项目自己做寻路，而是接住外部 mc-agent 的真实路径/危险 ground truth，避免模型靠截图硬猜。
 - `P17` 已补第十九段游戏内聊天桥：按 `github_girl` game agent “游戏内身体/外部 agent 负责实际交互，本应用负责对话和任务调度”的方向，主进程 `minecraftAgent` 新增最近游戏聊天缓存和 `plugin.minecraft_chat` 工具；入站兼容 `chat/game_chat/player_chat/message`，出站发送 `{ type: "chat", text, message }` 给外部 mc-agent。LLM 的 Minecraft bot 视角会带入最近聊天，前端文本直达支持“在游戏里说/回复/打字…”，收到游戏聊天事件会触发陪玩 nudge，让她能自然判断是否在 MC 里回一句。适配点：`github_girl` 已公开的 Minecraft 插件说明里没有稳定聊天帧 schema，本项目先做兼容层；真正把消息发进 MC 聊天还需要外部 mc-agent 实现/确认该帧。
 - `P17` 已补第二十段目标阶段/检查点状态：继续按 `github_girl` `GameAgentService` 把 pending、dispatched history、task_finished、keep-going nudge 分开的思路，本项目新增 `MinecraftAgentPlanState`，在任务帧真正发出后记录 active step，收到完成/受阻/超时/打断/迟到完成后回写最近步骤、摘要、连续失败次数和最后结果时间。`planState` 进入 `MinecraftAgentStatus`、LLM 的 Minecraft bot 视角、状态工具、前端状态回复和 keep-going nudge；当连续受阻时，prompt 会要求换具体坐标/目标或先问用户，不再重复派同一个动作。适配点：这还不是外部 mc-agent 里的真正规划器，而是当前应用内的目标阶段缓存；完整 plan/checkpoint/失败恢复仍需要后续结合 message-plane 和外部身体状态实现。
+- `P17` 已补第二十一段协议回放测试扩展：继续按 `github_girl` `smoke_local.py` / `smoke_overwrite.py` 的思路，把本项目 `scripts/smoke-minecraft-agent.mjs` 从普通 task/query_inventory/stale-task-id 扩到 `rich-state`、`blocked-task`、`chat` 三个 mock 场景。`rich-state` 会回放血量、坐标、维度、生物群系、装备、附近实体、队友位置、路径、危险、聊天和告警；`blocked-task` 会模拟 `status=ok` 但文本含 `could not/no path` 的 blocked marker；`chat` 会验证出站聊天帧和入站聊天回显。新增 `npm run smoke:minecraft-agent:mock:rich|blocked|chat`，用于后续改 Agent 架构时快速锁住协议行为。适配点：这仍是 Node WebSocket 协议级 smoke，不是 Electron 主进程内部服务测试；服务级测试还要等测试入口或 message-plane 拆出来后补。
 
-当前进度估算：整体迁移约 65%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 84%。
+当前进度估算：整体迁移约 66%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 85%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -228,7 +229,7 @@
 5. **多玩家协作语义**：已能缓存用户/队友距离、位置和附近玩家；还缺跟随半径、别挡路、分工采集、共享箱子、用户朝向等明确协作规则。
 6. **游戏内自然沟通**：已补基础聊天桥，能缓存游戏聊天并通过 `plugin.minecraft_chat` 向外部 mc-agent 发送短句；还缺外部 mc-agent 对聊天帧的稳定协议确认、游戏内用户身份映射，以及把游戏内聊天和桌面对话做更完整的去重/合并。
 7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。
-8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包；还缺 Electron 主进程服务级 smoke，自动覆盖断线、busy、overwrite 防抖、UI 事件回流。
+8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；还缺 Electron 主进程服务级 smoke，自动覆盖断线、busy、overwrite 防抖、UI 事件回流。
 
 ### 下一步建议顺序
 
