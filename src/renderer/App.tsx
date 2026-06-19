@@ -52,6 +52,7 @@ import {
   Live2DTouchSetConfig,
   Live2DTouchSetEntryConfig,
   MemoryState,
+  MinecraftAgentAlert,
   MinecraftAgentStatus,
   MinecraftAgentTaskResult,
   Mood,
@@ -246,6 +247,8 @@ function formatMinecraftTaskReply(result: AgentToolResult): string {
       return '这一步卡住太久了，我先停一下，等你下一句。';
     case 'interrupted':
       return '好，我先切到新的动作。';
+    case 'blocked':
+      return taskResult.text ? `这一步没真做成：${taskResult.text}` : '这一步被挡住了，可能需要更具体的坐标、玩家名或目标。';
     case 'error':
       return taskResult.text ? `这一步没做成：${taskResult.text}` : '这一步没做成，你再给我一个更具体的目标。';
     case 'ok':
@@ -259,6 +262,8 @@ function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): strin
       return result.text ? `这步做完了：${result.text}` : '这步做完了。';
     case 'timeout':
       return '这一步好像卡住了，我先停下等你。';
+    case 'blocked':
+      return result.text ? `这一步没真做成：${result.text}` : '这一步被挡住了，我先换个思路。';
     case 'error':
       return result.text ? `这一步没做成：${result.text}` : '这一步没做成，我先停下等你。';
     case 'interrupted':
@@ -268,6 +273,52 @@ function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): strin
     case 'not_connected':
       return null;
   }
+}
+
+function formatMinecraftAlertCause(cause?: Record<string, unknown>): string {
+  if (!cause) {
+    return '';
+  }
+
+  const parts: string[] = [];
+  const environment = typeof cause.environment === 'string' ? cause.environment : '';
+  const environmentLabels: Record<string, string> = {
+    lava: '踩到岩浆',
+    fire: '着火了',
+    soul_fire: '踩到灵魂火',
+    drowning: '快溺水了',
+    magma_block: '踩到岩浆块',
+    cactus: '扎到仙人掌',
+    sweet_berry_bush: '扎到甜浆果丛'
+  };
+  if (environment) {
+    parts.push(environmentLabels[environment] ?? `环境危险：${environment}`);
+  }
+
+  if (cause.fall) {
+    parts.push('可能是摔落伤害');
+  }
+
+  const attacker = cause.attacker;
+  if (attacker && typeof attacker === 'object' && !Array.isArray(attacker)) {
+    const attackerRecord = attacker as Record<string, unknown>;
+    const kind = typeof attackerRecord.kind === 'string' ? attackerRecord.kind : '';
+    const name = typeof attackerRecord.name === 'string' ? attackerRecord.name : '';
+    const distance = typeof attackerRecord.distance === 'number' ? `，距离约 ${attackerRecord.distance.toFixed(1)} 格` : '';
+    if (kind === 'player' && name) {
+      parts.push(`可能是 ${name} 打到我了${distance}`);
+    } else if (kind) {
+      parts.push(`附近有 ${kind}${distance}`);
+    }
+  }
+
+  return parts.join('；');
+}
+
+function formatMinecraftAlertCue(alert: MinecraftAgentAlert): string {
+  const cause = formatMinecraftAlertCause(alert.cause);
+  const head = /death|dead|fatal|critical|error/i.test(alert.severity) ? '危险，我这边出大事了。' : '我这边刚遇到危险。';
+  return [head, alert.text, cause ? `原因线索：${cause}` : '我先不乱猜原因。'].filter(Boolean).join('\n');
 }
 
 function formatMinecraftStatusReplyLegacy(result: AgentToolResult): string {
@@ -313,6 +364,8 @@ function formatMinecraftTaskReplyLegacy(result: AgentToolResult): string {
       return '这一步卡住太久了，我先停一下，等你下一句。';
     case 'interrupted':
       return '好，我先切到新的动作。';
+    case 'blocked':
+      return taskResult.text ? `这一步没真做成：${taskResult.text}` : '这一步被挡住了，可能需要更具体的坐标、玩家名或目标。';
     case 'error':
       return taskResult.text ? `这一步没做成：${taskResult.text}` : '这一步没做成，你再给我一个更具体的目标。';
     case 'ok':
@@ -326,6 +379,8 @@ function formatMinecraftTaskFinishedCueLegacy(result: MinecraftAgentTaskResult):
       return result.text ? `这步做完了：${result.text}` : '这步做完了。';
     case 'timeout':
       return '这一步好像卡住了，我先停下等你。';
+    case 'blocked':
+      return result.text ? `这一步没真做成：${result.text}` : '这一步被挡住了，我先换个思路。';
     case 'error':
       return result.text ? `这一步没做成：${result.text}` : '这一步没做成，我先停下等你。';
     case 'interrupted':
@@ -2900,7 +2955,32 @@ export function App(): ReactElement {
 
   useEffect(() => {
     return window.lover.onMinecraftAgentEvent((event) => {
-      if (!configRef.current.agent.gameCompanionEnabled || event.type !== 'taskFinished') {
+      if (!configRef.current.agent.gameCompanionEnabled) {
+        return;
+      }
+
+      if (event.type === 'alert') {
+        const cue = formatMinecraftAlertCue(event.alert);
+        updateMessages((current) => [...current, createMessage('assistant', cue)]);
+        setMood('concerned');
+        showPetReactionEmotion(
+          'concerned',
+          configRef.current.voice.ttsEnabled ? PET_REACTION_TIMING.maxVisibleMs : PET_REACTION_TIMING.textOnlyFallbackMs
+        );
+        if (configRef.current.voice.ttsEnabled) {
+          enqueueSpeech(cue);
+        }
+        setStatus('Minecraft 危险提醒');
+        if (configRef.current.agent.gameCompanionGame === 'minecraft') {
+          window.setTimeout(() => {
+            requestGameCompanionNudge(cue).catch(() => undefined);
+          }, 300);
+        }
+        restartListeningAfterSpeech();
+        return;
+      }
+
+      if (event.type !== 'taskFinished') {
         return;
       }
 

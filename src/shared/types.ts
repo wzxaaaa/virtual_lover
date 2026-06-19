@@ -292,6 +292,13 @@ export interface MinecraftAgentScreenshot {
   capturedAt: number;
 }
 
+export interface MinecraftAgentAlert {
+  text: string;
+  severity: string;
+  cause?: Record<string, unknown>;
+  receivedAt: number;
+}
+
 export interface MinecraftAgentStatus {
   wsUrl: string;
   running: boolean;
@@ -316,7 +323,7 @@ export interface MinecraftAgentTaskRequest {
 
 export interface MinecraftAgentTaskResult {
   ok: boolean;
-  status: 'dispatched' | 'ok' | 'busy' | 'timeout' | 'not_connected' | 'interrupted' | 'error';
+  status: 'dispatched' | 'ok' | 'busy' | 'timeout' | 'not_connected' | 'interrupted' | 'blocked' | 'error';
   query: string;
   taskId?: string;
   text?: string;
@@ -343,6 +350,10 @@ export type MinecraftAgentEvent =
   | {
       type: 'log';
       text: string;
+    }
+  | {
+      type: 'alert';
+      alert: MinecraftAgentAlert;
     }
   | {
       type: 'screenshot';

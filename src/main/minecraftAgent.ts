@@ -31,6 +31,25 @@ const RECONNECT_INTERVAL_MS = 5000;
 const LOG_CACHE_LIMIT = 200;
 const SCREENSHOT_CACHE_LIMIT = 3;
 const DISPATCH_HISTORY_LIMIT = 32;
+const BLOCKED_TASK_FEEDBACK_MARKERS = [
+  'obstacle',
+  'obstructed',
+  'not found',
+  'could not',
+  "couldn't",
+  'unable',
+  'failed',
+  'no path',
+  'blocked',
+  'missing',
+  'cannot',
+  "can't",
+  'unavailable',
+  'please provide',
+  'provide the exact',
+  'no target',
+  'target not'
+] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -96,7 +115,14 @@ function screenshotFromFrame(frame: Record<string, unknown>): MinecraftAgentScre
 
 function normalizeTaskStatus(status: unknown, text: string): MinecraftAgentTaskResult['status'] {
   const raw = stringOrEmpty(status).toLowerCase();
-  if (raw === 'ok' || raw === 'success' || raw === 'done') {
+  const lowerText = text.toLowerCase();
+  const rawLooksOk = raw === 'ok' || raw === 'success' || raw === 'done';
+  const blockedByFeedback = BLOCKED_TASK_FEEDBACK_MARKERS.some((marker) => lowerText.includes(marker));
+  if (raw.includes('block') || raw.includes('stuck') || ((!raw || rawLooksOk) && blockedByFeedback)) {
+    return 'blocked';
+  }
+
+  if (rawLooksOk) {
     return 'ok';
   }
 
@@ -108,7 +134,6 @@ function normalizeTaskStatus(status: unknown, text: string): MinecraftAgentTaskR
     return 'interrupted';
   }
 
-  const lowerText = text.toLowerCase();
   if (raw.includes('fail') || raw.includes('error') || lowerText.includes('failed') || lowerText.includes('could not') || lowerText.includes('unable')) {
     return 'error';
   }
@@ -139,6 +164,10 @@ function taskSummary(result: MinecraftAgentTaskResult): string {
 
   if (result.status === 'interrupted') {
     return `Minecraft 动作已被打断：${result.query}`;
+  }
+
+  if (result.status === 'blocked') {
+    return `Minecraft 动作受阻：${result.query}`;
   }
 
   return `Minecraft 动作失败：${result.query}`;
@@ -592,8 +621,22 @@ class MinecraftAgentService {
     if (type === 'alert') {
       const text = stringOrEmpty(frame.text) || stringOrEmpty(frame.message);
       if (text) {
-        this.pushLog(text);
-        this.events.emit('event', { type: 'log', text } satisfies MinecraftAgentEvent);
+        const severity = stringOrEmpty(frame.severity).toLowerCase() || 'warn';
+        const cause = isRecord(frame.cause) ? { ...frame.cause } : undefined;
+        this.pushLog(`[${severity}] ${text}`);
+        this.events.emit(
+          'event',
+          {
+            type: 'alert',
+            alert: {
+              text,
+              severity,
+              cause,
+              receivedAt: Date.now()
+            }
+          } satisfies MinecraftAgentEvent
+        );
+        this.emitStatus();
       }
       return;
     }
