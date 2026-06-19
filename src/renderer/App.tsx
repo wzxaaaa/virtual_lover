@@ -269,6 +269,22 @@ function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
   return parts.length > 0 ? `我这边：${parts.join('；')}` : '';
 }
 
+function formatMinecraftPlanStateReply(status: MinecraftAgentStatus): string {
+  const planState = status.planState;
+  if (!planState) {
+    return '';
+  }
+
+  const active = planState.activeStep ? `当前这步：${planState.activeStep.task.slice(0, 90)}` : '';
+  const recent = planState.recentSteps
+    .filter((step) => step.status !== 'active')
+    .slice(-2)
+    .map((step) => `${step.status}：${step.task.slice(0, 60)}`)
+    .join('；');
+  const failure = planState.failureStreak > 0 ? `连续受阻 ${planState.failureStreak} 次，我会换思路。` : '';
+  return [active, recent ? `刚才：${recent}` : '', failure].filter(Boolean).join('\n');
+}
+
 function formatMinecraftStatusReply(result: AgentToolResult): string {
   if (!result.ok) {
     return '我现在还没有进入游戏世界，只能先看着画面陪你。';
@@ -291,10 +307,11 @@ function formatMinecraftStatusReply(result: AgentToolResult): string {
     .join('、');
   const goalLine = status.activeGoal ? `这一局我记着：${status.activeGoal}` : '';
   const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
+  const planLine = formatMinecraftPlanStateReply(status);
   const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
   const worldLine = formatMinecraftWorldStateReply(status);
   const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
-  return [goalLine, taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
+  return [goalLine, taskLine, planLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
 }
 
 function formatMinecraftTaskReply(result: AgentToolResult): string {
@@ -4065,6 +4082,8 @@ export function App(): ReactElement {
       visibleApp: 'Minecraft',
       userActivity: [
         status?.activeGoal ? `当前目标：${status.activeGoal}` : '',
+        status?.planState?.activeStep ? `当前步骤：${status.planState.activeStep.task}` : '',
+        status?.planState?.failureStreak ? `连续受阻：${status.planState.failureStreak}` : '',
         status?.pendingTask ? `她正在执行：${status.pendingTask}` : '她当前空闲或尚未进入世界。'
       ]
         .filter(Boolean)

@@ -8,6 +8,9 @@ import type {
   MinecraftAgentEvent,
   MinecraftAgentDangerState,
   MinecraftAgentInventoryResponse,
+  MinecraftAgentPlanState,
+  MinecraftAgentPlanStep,
+  MinecraftAgentPlanStepStatus,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
   MinecraftAgentScreenshot,
@@ -40,6 +43,7 @@ const LOG_CACHE_LIMIT = 200;
 const SCREENSHOT_CACHE_LIMIT = 3;
 const CHAT_CACHE_LIMIT = 30;
 const DISPATCH_HISTORY_LIMIT = 32;
+const PLAN_HISTORY_LIMIT = 12;
 const SCREENSHOT_MAX_EDGE_PX = 1024;
 const SCREENSHOT_MAX_BYTES = 100 * 1024;
 const SCREENSHOT_JPEG_QUALITIES = [80, 65, 50, 40, 30] as const;
@@ -153,9 +157,15 @@ function keepGoingNudgeCue(inventory: Record<string, number>, lastInventoryAt: n
     .join('\n');
 }
 
-function keepGoingNudgeCueWithGoal(inventory: Record<string, number>, lastInventoryAt: number, activeGoal: string | null): string {
+function keepGoingNudgeCueWithGoal(
+  inventory: Record<string, number>,
+  lastInventoryAt: number,
+  activeGoal: string | null,
+  planState: MinecraftAgentPlanState | null
+): string {
   return [
     keepGoingNudgeCue(inventory, lastInventoryAt),
+    formatPlanCueLine(planState),
     activeGoal ? `这一局当前目标：${activeGoal.slice(0, 220)}。如果继续行动，必须服务于这个目标；如果目标已经完成或明显不合适，就先用一句自然的话向用户确认，不要硬派新动作。` : ''
   ]
     .filter(Boolean)
@@ -173,6 +183,36 @@ function normalizeActiveGoal(goal: unknown, taskText: string): string | null {
   }
 
   return rawGoal.slice(0, 300);
+}
+
+function planStatusFromTaskResult(status: MinecraftAgentTaskResult['status']): MinecraftAgentPlanStepStatus {
+  if (status === 'dispatched' || status === 'busy') {
+    return 'active';
+  }
+  return status;
+}
+
+function shouldCountPlanFailure(status: MinecraftAgentPlanStepStatus): boolean {
+  return status === 'blocked' || status === 'timeout' || status === 'not_connected' || status === 'error';
+}
+
+function clonePlanStep(step: MinecraftAgentPlanStep): MinecraftAgentPlanStep {
+  return { ...step };
+}
+
+function formatPlanCueLine(planState: MinecraftAgentPlanState | null): string {
+  if (!planState) {
+    return '';
+  }
+
+  const active = planState.activeStep ? `正在执行：${planState.activeStep.task.slice(0, 140)}` : '';
+  const recent = planState.recentSteps
+    .filter((step) => step.status !== 'active')
+    .slice(-3)
+    .map((step) => `${step.status}:${step.task.slice(0, 80)}`)
+    .join('；');
+  const failure = planState.failureStreak > 0 ? `连续失败/受阻：${planState.failureStreak} 次。` : '';
+  return [active, recent ? `最近步骤：${recent}` : '', failure].filter(Boolean).join('；');
 }
 
 function normalizeInventory(value: unknown): Record<string, number> | null {
@@ -825,6 +865,9 @@ class MinecraftAgentService {
   private pendingTask: PendingTask | null = null;
   private activeGoal: string | null = null;
   private activeGoalUpdatedAt = 0;
+  private planSteps: MinecraftAgentPlanStep[] = [];
+  private planFailureStreak = 0;
+  private planLastOutcomeAt = 0;
   private logCache: string[] = [];
   private screenshotCache: MinecraftAgentScreenshot[] = [];
   private chatCache: MinecraftAgentChatMessage[] = [];
@@ -881,6 +924,7 @@ class MinecraftAgentService {
     this.lastNudgeAt = 0;
     this.activeGoal = null;
     this.activeGoalUpdatedAt = 0;
+    this.resetPlanState();
     this.worldState = null;
     this.chatCache = [];
 
@@ -919,6 +963,7 @@ class MinecraftAgentService {
       lastInventoryAt: this.lastInventoryAt,
       worldState: cloneWorldState(this.worldState),
       lastChatMessages: this.chatCache.map((message) => ({ ...message })),
+      planState: this.buildPlanState(),
       lastNudgeKind: this.lastNudgeKind,
       lastNudgeAt: this.lastNudgeAt,
       lastError: this.lastError
@@ -985,6 +1030,7 @@ class MinecraftAgentService {
         });
       } else {
         this.updateActiveGoalFromRequest(request, taskText);
+        this.recordPlanDispatch(taskText, taskId);
         this.emitStatus();
       }
     });
@@ -1051,6 +1097,7 @@ class MinecraftAgentService {
     }
 
     this.updateActiveGoalFromRequest(request, taskText);
+    this.recordPlanDispatch(taskText, taskId);
     const result: MinecraftAgentTaskResult = {
       ok: true,
       status: 'dispatched',
@@ -1211,6 +1258,90 @@ class MinecraftAgentService {
 
     this.activeGoal = nextGoal;
     this.activeGoalUpdatedAt = nextGoal ? Date.now() : 0;
+    this.resetPlanState();
+  }
+
+  private resetPlanState(): void {
+    this.planSteps = [];
+    this.planFailureStreak = 0;
+    this.planLastOutcomeAt = 0;
+  }
+
+  private buildPlanState(): MinecraftAgentPlanState | null {
+    if (!this.activeGoal && this.planSteps.length === 0) {
+      return null;
+    }
+
+    const activeStep = [...this.planSteps].reverse().find((step) => step.status === 'active') ?? null;
+    return {
+      goal: this.activeGoal,
+      goalUpdatedAt: this.activeGoalUpdatedAt,
+      activeStep: activeStep ? clonePlanStep(activeStep) : null,
+      recentSteps: this.planSteps.slice(-PLAN_HISTORY_LIMIT).map(clonePlanStep),
+      failureStreak: this.planFailureStreak,
+      lastOutcomeAt: this.planLastOutcomeAt
+    };
+  }
+
+  private recordPlanDispatch(taskText: string, taskId: string): void {
+    if (!this.activeGoal && shouldClearActiveGoal(taskText)) {
+      this.resetPlanState();
+      return;
+    }
+
+    const now = Date.now();
+    const step: MinecraftAgentPlanStep = {
+      id: taskId,
+      taskId,
+      task: taskText,
+      goal: this.activeGoal,
+      status: 'active',
+      startedAt: now,
+      updatedAt: now
+    };
+    this.planSteps = [...this.planSteps.filter((item) => item.status !== 'active'), step].slice(-PLAN_HISTORY_LIMIT);
+  }
+
+  private recordPlanOutcome(result: MinecraftAgentTaskResult): void {
+    const status = planStatusFromTaskResult(result.status);
+    if (status === 'active') {
+      return;
+    }
+
+    const now = Date.now();
+    const index = result.taskId
+      ? this.planSteps.findIndex((step) => step.taskId === result.taskId)
+      : [...this.planSteps].reverse().findIndex((step) => step.status === 'active' && step.task === result.query);
+    const normalizedIndex = index >= 0 && result.taskId ? index : index >= 0 ? this.planSteps.length - 1 - index : -1;
+
+    if (normalizedIndex >= 0) {
+      const current = this.planSteps[normalizedIndex];
+      const summary = result.summary || result.text || current.summary;
+      this.planSteps[normalizedIndex] = {
+        ...current,
+        status,
+        updatedAt: now,
+        finishedAt: now,
+        ...(summary ? { summary } : {}),
+        ...(result.error ? { error: result.error } : {})
+      };
+    } else {
+      this.planSteps.push({
+        id: result.taskId || `retro-${now}`,
+        ...(result.taskId ? { taskId: result.taskId } : {}),
+        task: result.query,
+        goal: this.activeGoal,
+        status,
+        startedAt: now,
+        updatedAt: now,
+        finishedAt: now,
+        summary: result.summary || result.text || ''
+      });
+      this.planSteps = this.planSteps.slice(-PLAN_HISTORY_LIMIT);
+    }
+
+    this.planFailureStreak = shouldCountPlanFailure(status) ? this.planFailureStreak + 1 : 0;
+    this.planLastOutcomeAt = now;
   }
 
   private rememberDispatchedTask(taskId: string, taskText: string): void {
@@ -1351,7 +1482,7 @@ class MinecraftAgentService {
           type: 'nudge',
           nudge: {
             kind: 'keep_going',
-            cue: keepGoingNudgeCueWithGoal(this.lastInventory, this.lastInventoryAt, this.activeGoal),
+            cue: keepGoingNudgeCueWithGoal(this.lastInventory, this.lastInventoryAt, this.activeGoal, this.buildPlanState()),
             createdAt: now,
             priority: 3
           }
@@ -1578,6 +1709,7 @@ class MinecraftAgentService {
     if (!this.pendingTask) {
       this.lastTaskFinishedAt = Date.now();
     }
+    this.recordPlanOutcome(result);
     this.events.emit('event', { type: 'taskFinished', result } satisfies MinecraftAgentEvent);
     this.emitStatus();
   }
@@ -1611,6 +1743,7 @@ class MinecraftAgentService {
       ...result,
       summary: result.summary || taskSummary(result)
     };
+    this.recordPlanOutcome(finalResult);
     pending.resolve(finalResult);
     this.events.emit('event', { type: 'taskFinished', result: finalResult } satisfies MinecraftAgentEvent);
     this.emitStatus();

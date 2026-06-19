@@ -9,6 +9,7 @@ import {
   MemoryState,
   MinecraftAgentChatMessage,
   MinecraftAgentDangerState,
+  MinecraftAgentPlanState,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
   MinecraftAgentTargetState,
@@ -356,6 +357,22 @@ function formatMinecraftChat(messages: MinecraftAgentChatMessage[]): string {
     .join(' / ');
 }
 
+function formatMinecraftPlanState(planState?: MinecraftAgentPlanState | null): string {
+  if (!planState) {
+    return '目标阶段：暂无。';
+  }
+
+  const active = planState.activeStep ? `正在做 ${planState.activeStep.task}` : '当前没有执行步骤';
+  const recent = planState.recentSteps
+    .filter((step) => step.status !== 'active')
+    .slice(-4)
+    .map((step) => `${step.status}:${step.task.slice(0, 80)}${step.summary ? `(${step.summary.slice(0, 80)})` : ''}`)
+    .join('；');
+  const failure = planState.failureStreak > 0 ? `连续失败/受阻 ${planState.failureStreak} 次` : '';
+
+  return [`目标阶段：${active}`, recent ? `最近步骤：${recent}` : '', failure].filter(Boolean).join('；');
+}
+
 function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolean): string {
   const status = request.minecraftStatus;
   if (!status) {
@@ -366,6 +383,7 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
     'Minecraft bot 视角：这是她在游戏里的身体状态，不是用户桌面。',
     `连接：${status.connected ? '已连接' : '未连接'}；当前任务：${status.pendingTask || '空闲'}`,
     status.activeGoal ? `这一局当前目标：${status.activeGoal}` : '这一局当前目标：暂无。',
+    formatMinecraftPlanState(status.planState),
     `最近游戏聊天：${formatMinecraftChat(status.lastChatMessages ?? [])}`,
     status.lastLog ? `最近游戏反馈：${status.lastLog}` : '',
     status.lastNudgeAt > 0
@@ -430,8 +448,9 @@ Minecraft 工具规则：
 3. task 必须具体、可执行、短，不要写抽象愿望；优先英文，例如 "collect wood by chopping nearby trees, then stop somewhere safe"。
 4. goal 用来描述这一局持续追的目标，可以直接用用户原话或短中文总结；如果只是查状态/背包，不要写 goal。
 5. overwrite 只用于“停下/别做/换成/改去/过来”等明确纠正；不要因为你想到更优路线就覆盖。刚下发不到 2 秒的新任务会被保护，别连续刷覆盖。
-6. minecraft_chat 只在用户让你在游戏里说话/回复，或队友游戏聊天需要你短句回应时使用；不要每轮普通桌面对话都发游戏聊天。聊天内容保持很短，中文不超过 80 字，英文不超过 120 字。
-7. reply 给用户听时不要说“工具”“tool”“minecraft_task”“minecraft_chat”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
+6. 如果“目标阶段”显示连续失败/受阻，不要重复派同一动作；换一个更具体的坐标/目标，或先用一句自然的话向用户确认。
+7. minecraft_chat 只在用户让你在游戏里说话/回复，或队友游戏聊天需要你短句回应时使用；不要每轮普通桌面对话都发游戏聊天。聊天内容保持很短，中文不超过 80 字，英文不超过 120 字。
+8. reply 给用户听时不要说“工具”“tool”“minecraft_task”“minecraft_chat”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
 }
 
 function systemPrompt(config: AppConfig): string {

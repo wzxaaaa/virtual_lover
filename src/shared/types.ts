@@ -312,6 +312,30 @@ export interface MinecraftAgentChatMessage {
   receivedAt: number;
 }
 
+export type MinecraftAgentPlanStepStatus = 'active' | 'ok' | 'blocked' | 'timeout' | 'interrupted' | 'not_connected' | 'error';
+
+export interface MinecraftAgentPlanStep {
+  id: string;
+  task: string;
+  goal: string | null;
+  status: MinecraftAgentPlanStepStatus;
+  startedAt: number;
+  updatedAt: number;
+  taskId?: string;
+  finishedAt?: number;
+  summary?: string;
+  error?: string;
+}
+
+export interface MinecraftAgentPlanState {
+  goal: string | null;
+  goalUpdatedAt: number;
+  activeStep: MinecraftAgentPlanStep | null;
+  recentSteps: MinecraftAgentPlanStep[];
+  failureStreak: number;
+  lastOutcomeAt: number;
+}
+
 export interface MinecraftAgentPosition {
   x: number;
   y: number;
@@ -398,6 +422,7 @@ export interface MinecraftAgentStatus {
   lastInventoryAt: number;
   worldState: MinecraftAgentWorldState | null;
   lastChatMessages: MinecraftAgentChatMessage[];
+  planState: MinecraftAgentPlanState | null;
   lastNudgeKind: MinecraftAgentNudge['kind'] | null;
   lastNudgeAt: number;
   lastError: string | null;

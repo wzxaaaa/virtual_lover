@@ -205,6 +205,22 @@ function formatMinecraftRecentChat(status: MinecraftAgentStatus): string {
     .join(' / ')}`;
 }
 
+function formatMinecraftPlanState(status: MinecraftAgentStatus): string {
+  const planState = status.planState;
+  if (!planState) {
+    return '';
+  }
+
+  const active = planState.activeStep ? `当前步骤：${planState.activeStep.task}` : '';
+  const recent = planState.recentSteps
+    .filter((step) => step.status !== 'active')
+    .slice(-3)
+    .map((step) => `${step.status} ${step.task.slice(0, 60)}`)
+    .join(' / ');
+  const failure = planState.failureStreak > 0 ? `连续受阻：${planState.failureStreak}` : '';
+  return [active, recent ? `最近步骤：${recent}` : '', failure].filter(Boolean).join('；');
+}
+
 export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null): string {
   if (!status) {
     return 'Minecraft Agent：尚未查询。';
@@ -220,6 +236,7 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
   return [
     `Minecraft Agent：${status.connected ? '已连接' : '未连接'}，ws=${status.wsUrl}`,
     status.activeGoal ? `当前目标：${status.activeGoal}` : '',
+    formatMinecraftPlanState(status),
     status.pendingTask ? `当前任务：${status.pendingTask}` : '当前任务：空闲',
     status.lastNudgeAt > 0
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleTimeString('zh-CN')}`
