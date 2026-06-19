@@ -207,8 +207,9 @@
 - `P17` 已补第二十二段多人协作语义：在不破坏 `github_girl` 已迁的 `minecraft_task`/busy/overwrite/nudge 规则前提下，新增“跟随 3-5 格、不挡视线/路径、距离超过 8 格先等待或找回、危险优先保护、分工不抢资源、共享箱子只处理富余物品”等协作约束。文本直达现在能识别“别挡路/保护我/等我/带路/分工/共享箱子”等指令并转成更具体的英文 task；LLM Minecraft 视角、游戏同伴 prompt、状态工具回复和市场能力都同步显示协作状态。主进程状态解析新增 `sharedContainers` 和 `blockInteraction` 兼容字段，rich-state smoke 也回放并断言共享容器/方块交互进度。适配点：`github_girl` 公开 Minecraft 插件本身没有更细的协作 schema，本轮属于在其 game-agent 桥接逻辑之上的本项目适配增强；真正“不挡路/共享箱子/分工”的物理执行还依赖外部 mc-agent 按 task 落地。
 - `P17` 已补第二十三段 Electron 主进程服务级 smoke：新增 `scripts/smoke-minecraft-agent-service.mjs` 和 `npm run smoke:minecraft-agent:service`，脚本会临时 bundle 真实 `MinecraftAgentService`，给 Node 环境注入最小 WebSocket client，再启动 mock mc-agent 验证主进程服务语义：`queryInventory` live 回包、`dispatchTask` pending 状态事件、busy 拦截、2 秒 overwrite 防抖、超过保护窗后的打断/替换、匹配 `task_finished` 清 pending、游戏内聊天事件、断线时中断 pending 并回流 disconnected 状态。该 smoke 抓出并修复了一个真实 race：原 `queryInventory` 先发送 `query_inventory` 再登记 waiter，外部 agent 快速回包时会丢响应；现在改为先登记 waiter 再发送，发送失败再移除 waiter。适配点：这不是完整 Electron 窗口 E2E，但已经覆盖主进程服务内核和 renderer 依赖的 `minecraft:agentEvent` 事件源。
 - `P17` 已补第二十四段 mc-agent 协作协议确认：保持 `github_girl` 旧协议向后兼容，不强制外部 agent 必须实现新握手；同时本项目新增 `MinecraftAgentProtocolState`，能识别外部 agent 发来的 `hello/agent_hello/capabilities/agent_capabilities/protocol` 帧，也会从 `agent_status`、聊天和 task_id echo 中推断已支持能力。`MinecraftAgentStatus.protocol` 现在包含客户端协议版本、agent 名称/版本/协议版本、已确认能力、仍缺能力和协作 contract；LLM Minecraft 视角与游戏同伴 prompt 会看到这些信息。出站 `task` 帧新增 `client` 元数据，携带 `virtual-lover-mc-agent/1`、客户端能力列表和协作 contract（跟随 3-5 格、超过 8 格找回/等待、不挡路、不挖用户脚下、不抢资源、共享箱子只处理富余物品），旧 agent 可忽略，新 agent 可据此实现物理层协作。服务级 smoke 和协议 smoke 都已覆盖 task frame contract 与 agent 能力声明。适配点：这仍不是内置 mineflayer 机器人本体；它把双方协议边界钉住，方便后续实现/替换外部 mc-agent。
+- `P17` 已补第二十五段 Electron renderer IPC/preload smoke：新增 `scripts/smoke-minecraft-renderer.mjs` 和 `npm run smoke:minecraft-agent:renderer`，脚本会临时 bundle 真实 `MinecraftAgentService` 与真实 `src/preload/preload.ts`，再启动一个隐藏 Electron renderer，通过 `window.lover.getMinecraftAgentStatus()`、`window.lover.invokeAgentTool(plugin.query_inventory/plugin.minecraft_task)` 和 `window.lover.onMinecraftAgentEvent()` 验证 Minecraft 状态、背包、任务派发、`protocol` 事件、`taskFinished` 事件和 DOM 事件流都能从 mock mc-agent 一路穿过主进程 IPC/preload 到 renderer。mock 还会断言出站 task frame 保留 `virtual-lover-mc-agent/1` 客户端协议元数据和协作 contract。适配点：这不是完整聊天 UI 视觉 E2E，也没有连接真实 Minecraft/mineflayer；但它已经把 Electron renderer 依赖的关键桥打通，后续 UI 改动或 preload 断链会被稳定回归抓住。
 
-当前进度估算：整体迁移约 67%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 88%。
+当前进度估算：整体迁移约 68%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 89%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -232,12 +233,12 @@
 5. **多玩家协作语义**：已补跟随半径、别挡路、保护、带路、等待、分工采集、共享箱子等任务/prompt/status 规则，并通过 task frame `client.collaboration` 把 contract 明确传给外部 agent；还缺外部 mc-agent 真实物理层的“不挡路”寻路策略、共享容器锁/物品预定、稳定用户身份映射和基于用户视线方向的协作细节。
 6. **游戏内自然沟通**：已补基础聊天桥，能缓存游戏聊天并通过 `plugin.minecraft_chat` 向外部 mc-agent 发送短句；还缺外部 mc-agent 对聊天帧的稳定协议确认、游戏内用户身份映射，以及把游戏内聊天和桌面对话做更完整的去重/合并。
 7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。
-8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；也已有主进程服务级 smoke 覆盖 live inventory、busy、overwrite 防抖、匹配完成、聊天、断线和事件回流。还缺真正启动 Electron renderer 的端到端 UI smoke，以及接真实 Minecraft/mineflayer 的联机回放。
+8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；也已有主进程服务级 smoke 覆盖 live inventory、busy、overwrite 防抖、匹配完成、聊天、断线和事件回流；本轮新增 Electron renderer IPC/preload smoke，能验证 renderer 通过 `window.lover` 拿到状态、协议、背包、任务与事件。还缺完整聊天 UI 视觉 E2E，以及接真实 Minecraft/mineflayer 的联机回放。
 
 ### 下一步建议顺序
 
-1. 先补 **真实 Electron renderer UI smoke**，从 IPC/preload 到聊天 UI 验证 Minecraft 状态、任务、协议能力和事件能完整显示。
-2. 再推进 **外部 mc-agent 本体/打包**，让 mineflayer 机器人真正实现 `virtual-lover-mc-agent/1` 协作 contract。
+1. 先推进 **外部 mc-agent 本体/打包**，让 mineflayer 机器人真正实现 `virtual-lover-mc-agent/1` 协作 contract，并尽量做到本项目内可下载、可启动、可诊断。
+2. 再补 **完整聊天 UI 视觉 E2E**，验证真实 App 聊天窗口里 Minecraft 状态、任务、协议能力和事件能完整显示。
 3. 然后做 **全局 message-plane**，让 Minecraft 和其他 Agent 能共享 `read/respond`、priority、coalesce。
 4. 最后再拆 **独立 Agent 服务 + 任务系统**，这是大工程，应该在 Minecraft 核心稳定后动。
 

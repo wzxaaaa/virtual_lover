@@ -17,6 +17,7 @@
     "smoke:minecraft-agent:mock:blocked": "node scripts/smoke-minecraft-agent.mjs --mock --scenario blocked-task --timeout 5",
     "smoke:minecraft-agent:mock:chat": "node scripts/smoke-minecraft-agent.mjs --mock --scenario chat --chat \"Hello from smoke\" --timeout 5",
     "smoke:minecraft-agent:service": "node scripts/smoke-minecraft-agent-service.mjs",
+    "smoke:minecraft-agent:renderer": "node scripts/smoke-minecraft-renderer.mjs",
     "check:packaged-secrets": "node scripts/check-packaged-secrets.mjs",
     "pack": "npm run build && npm run check:packaged-secrets && electron-builder --dir",
     "dist": "npm run build && npm run check:packaged-secrets && electron-builder --win nsis portable",
