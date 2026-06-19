@@ -205,7 +205,7 @@ function isMinecraftAgentTaskResult(value: unknown): value is MinecraftAgentTask
 
 function formatMinecraftStatusReply(result: AgentToolResult): string {
   if (!result.ok) {
-    return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+    return '我现在还没有进入游戏世界，只能先看着画面陪你。';
   }
 
   if (!isMinecraftAgentStatus(result.output)) {
@@ -214,7 +214,7 @@ function formatMinecraftStatusReply(result: AgentToolResult): string {
 
   const status = result.output;
   if (!status.connected) {
-    return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+    return '我现在还没有作为第二个玩家进入世界。先启动 mc-agent，让她的独立账号进同一个 LAN 世界，我就能让她去砍树、跟着你或者查背包。';
   }
 
   const inventoryItems = Object.entries(status.lastInventory)
@@ -239,6 +239,73 @@ function formatMinecraftTaskReply(result: AgentToolResult): string {
     case 'dispatched':
       return '好，我去做。';
     case 'busy':
+      return `我还在做上一件事：${taskResult.query.slice(0, 80)}。要打断的话，直接说“停一下，改去……”`;
+    case 'not_connected':
+      return '我现在还没有作为第二个玩家进入世界。先启动 mc-agent，让她的独立账号进同一个 LAN 世界，我再去执行这个动作。';
+    case 'timeout':
+      return '这一步卡住太久了，我先停一下，等你下一句。';
+    case 'interrupted':
+      return '好，我先切到新的动作。';
+    case 'error':
+      return taskResult.text ? `这一步没做成：${taskResult.text}` : '这一步没做成，你再给我一个更具体的目标。';
+    case 'ok':
+      return taskResult.text ? `这步做完了：${taskResult.text}` : '这步做完了。';
+  }
+}
+
+function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): string | null {
+  switch (result.status) {
+    case 'ok':
+      return result.text ? `这步做完了：${result.text}` : '这步做完了。';
+    case 'timeout':
+      return '这一步好像卡住了，我先停下等你。';
+    case 'error':
+      return result.text ? `这一步没做成：${result.text}` : '这一步没做成，我先停下等你。';
+    case 'interrupted':
+      return null;
+    case 'busy':
+    case 'dispatched':
+    case 'not_connected':
+      return null;
+  }
+}
+
+function formatMinecraftStatusReplyLegacy(result: AgentToolResult): string {
+  if (!result.ok) {
+    return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+  }
+
+  if (!isMinecraftAgentStatus(result.output)) {
+    return result.message || '我现在在 Minecraft 陪玩状态。';
+  }
+
+  const status = result.output;
+  if (!status.connected) {
+    return '我现在还摸不到游戏角色，只能先看着画面陪你。';
+  }
+
+  const inventoryItems = Object.entries(status.lastInventory)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([name, count]) => `${name}×${count}`)
+    .join('、');
+  const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
+  const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
+  const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
+  return [taskLine, logLine, bagLine].filter(Boolean).join('\n');
+}
+
+function formatMinecraftTaskReplyLegacy(result: AgentToolResult): string {
+  if (!isMinecraftAgentTaskResult(result.output)) {
+    return result.ok ? '好，我去做。' : result.message || '这一步我没接住，你再说具体一点。';
+  }
+
+  const taskResult = result.output;
+  switch (taskResult.status) {
+    case 'dispatched':
+      return '好，我去做。';
+    case 'busy':
       return `我还在做上一步：${taskResult.query.slice(0, 80)}。要打断的话，直接说“停一下，改去……”。`;
     case 'not_connected':
       return '我现在还摸不到游戏角色，只能先看着画面陪你。';
@@ -253,7 +320,7 @@ function formatMinecraftTaskReply(result: AgentToolResult): string {
   }
 }
 
-function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): string | null {
+function formatMinecraftTaskFinishedCueLegacy(result: MinecraftAgentTaskResult): string | null {
   switch (result.status) {
     case 'ok':
       return result.text ? `这步做完了：${result.text}` : '这步做完了。';

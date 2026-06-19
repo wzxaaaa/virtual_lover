@@ -127,6 +127,11 @@ export interface ProviderConnectivityResponse {
   latencyMs?: number;
 }
 
+export interface OpenPathResult {
+  ok: boolean;
+  message: string;
+}
+
 export interface DoubaoSpeechConfig {
   baseUrl: string;
   apiKey: string;
@@ -275,6 +280,8 @@ export interface AgentConfig {
   gameCompanionGame: 'minecraft' | 'generic';
   gameCompanionIntervalMs: number;
   minecraftAgentWsUrl: string;
+  minecraftAgentAdminUrl: string;
+  minecraftAgentLaunchPath: string;
   minecraftAgentTaskTimeoutMs: number;
   autoRecoverFailedActions: boolean;
 }
@@ -938,6 +945,8 @@ export const DEFAULT_CONFIG: AppConfig = {
     gameCompanionGame: 'minecraft',
     gameCompanionIntervalMs: 5000,
     minecraftAgentWsUrl: 'ws://localhost:48909',
+    minecraftAgentAdminUrl: 'http://localhost:8765',
+    minecraftAgentLaunchPath: '',
     minecraftAgentTaskTimeoutMs: 120000,
     autoRecoverFailedActions: true
   },

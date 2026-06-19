@@ -71,11 +71,12 @@ export const BUILTIN_MCP_SERVERS: MarketplaceItem[] = [
     id: 'mcp.minecraft',
     kind: 'mcp',
     name: 'Minecraft Agent',
-    summary: '连接本地 mc-agent，让角色能接入我的世界。',
-    description: '通过 WebSocket ws://localhost:48909 接收游戏日志、截图、背包和任务完成事件，并下发 minecraft_task。',
+    summary: '连接外部 mc-agent，让她作为第二个玩家进 MC。',
+    description:
+      '桥接外部 mineflayer mc-agent：本应用负责对话和任务下发，mc-agent 使用独立 Minecraft 账号进入你的世界并控制 bot 角色。',
     status: 'installed',
     builtin: true,
-    tags: ['Minecraft', '游戏', 'WebSocket'],
+    tags: ['Minecraft', 'mineflayer', '第二玩家', 'WebSocket'],
     capabilities: ['minecraft_task', 'query_inventory', 'game_agent_status'],
     entrypoints: ['minecraft:agentStatus', 'minecraft:agentTask', 'minecraft:agentInventory']
   },
@@ -106,7 +107,7 @@ export const BUILTIN_MCP_SERVERS: MarketplaceItem[] = [
   {
     id: 'mcp.study-companion',
     kind: 'mcp',
-    name: '学习伴侣',
+    name: '学习伙伴',
     summary: 'OCR、题目讲解和番茄钟接口预留。',
     description: '为后续学习场景提供 OCR、截图题目解析、知识讲解和学习节奏管理接口。',
     status: 'comingSoon',

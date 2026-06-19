@@ -25,6 +25,7 @@ import {
   AutomationAction,
   DesktopDisplayInfo,
   MinecraftAgentTaskRequest,
+  OpenPathResult,
   PetCursorPosition,
   PetWindowMoveToRequest,
   PetWindowMoveResult,
@@ -415,6 +416,19 @@ ipcMain.handle('shell:openExternal', async (_event, url: string) => {
   if (!href) return false;
   await shell.openExternal(href);
   return true;
+});
+ipcMain.handle('shell:openPath', async (_event, targetPath: string): Promise<OpenPathResult> => {
+  const cleanPath = typeof targetPath === 'string' ? targetPath.trim() : '';
+  if (!cleanPath) {
+    return { ok: false, message: '路径不能为空。' };
+  }
+
+  const error = await shell.openPath(cleanPath);
+  if (error) {
+    return { ok: false, message: error };
+  }
+
+  return { ok: true, message: '已打开。' };
 });
 ipcMain.handle('live2d:models:list', async () => listLive2DModels());
 ipcMain.handle('live2d:models:importDirectory', async () => importLive2DModelDirectory(mainWindow));

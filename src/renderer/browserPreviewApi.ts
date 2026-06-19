@@ -19,6 +19,7 @@ import {
   type MinecraftAgentStatus,
   type MinecraftAgentTaskRequest,
   type MinecraftAgentTaskResult,
+  type OpenPathResult,
   type PetCursorPosition,
   type PetWindowMoveToRequest,
   type PetWindowMoveResult,
@@ -169,6 +170,10 @@ export function installBrowserPreviewApi(): void {
       window.open(url, '_blank', 'noopener,noreferrer');
       return true;
     },
+    openPath: async (_targetPath: string): Promise<OpenPathResult> => ({
+      ok: false,
+      message: 'Browser preview cannot open local paths.'
+    }),
     listLive2DModels: async () => previewLive2DModels(),
     importLive2DModelDirectory: async (): Promise<Live2DModelImportResult> => ({
       canceled: true,

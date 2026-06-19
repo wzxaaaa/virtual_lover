@@ -20,6 +20,7 @@ import {
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
   MinecraftAgentTaskResult,
+  OpenPathResult,
   PetCursorPosition,
   PetWindowMoveToRequest,
   PetWindowMoveResult,
@@ -56,6 +57,7 @@ const api = {
   testProviderConnectivity: (request: ProviderConnectivityRequest): Promise<ProviderConnectivityResponse> =>
     ipcRenderer.invoke('provider:testConnectivity', request),
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke('shell:openExternal', url),
+  openPath: (targetPath: string): Promise<OpenPathResult> => ipcRenderer.invoke('shell:openPath', targetPath),
   listLive2DModels: (): Promise<Live2DModelEntry[]> => ipcRenderer.invoke('live2d:models:list'),
   importLive2DModelDirectory: (): Promise<Live2DModelImportResult> => ipcRenderer.invoke('live2d:models:importDirectory'),
   deleteLive2DModel: (modelIdOrUrl: string): Promise<Live2DModelDeleteResult> => ipcRenderer.invoke('live2d:models:delete', modelIdOrUrl),

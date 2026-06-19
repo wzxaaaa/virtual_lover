@@ -209,6 +209,8 @@ function mergeAgentConfig(base: AgentConfig, value: unknown): AgentConfig {
     gameCompanionGame: gameCompanionGame === 'minecraft' || gameCompanionGame === 'generic' ? gameCompanionGame : base.gameCompanionGame,
     gameCompanionIntervalMs: integerInRange(agentValue.gameCompanionIntervalMs, base.gameCompanionIntervalMs, 5_000, 120_000),
     minecraftAgentWsUrl: stringOrFallback(agentValue.minecraftAgentWsUrl, base.minecraftAgentWsUrl).trim() || base.minecraftAgentWsUrl,
+    minecraftAgentAdminUrl: stringOrFallback(agentValue.minecraftAgentAdminUrl, base.minecraftAgentAdminUrl).trim() || base.minecraftAgentAdminUrl,
+    minecraftAgentLaunchPath: stringOrFallback(agentValue.minecraftAgentLaunchPath, base.minecraftAgentLaunchPath).trim(),
     minecraftAgentTaskTimeoutMs: integerInRange(agentValue.minecraftAgentTaskTimeoutMs, base.minecraftAgentTaskTimeoutMs, 1_000, 300_000),
     autoRecoverFailedActions: booleanOrFallback(agentValue.autoRecoverFailedActions, base.autoRecoverFailedActions)
   };
