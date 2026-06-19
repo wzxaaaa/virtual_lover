@@ -628,6 +628,7 @@ export interface AgentTurnRequest {
   history: ConversationMessage[];
   screen?: ScreenCapture | null;
   camera?: CameraCapture | null;
+  minecraftStatus?: MinecraftAgentStatus | null;
   screenContext?: ScreenObservation | null;
   previousActionResults?: ActionResult[];
   memory?: MemoryState | null;

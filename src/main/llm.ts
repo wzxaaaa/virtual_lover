@@ -117,11 +117,20 @@ function providerReady(provider: ProviderEndpointConfig): boolean {
   return Boolean(provider.apiKey || providerAllowsMissingKey(provider.baseUrl));
 }
 
+function isMinecraftAgentContextRelevant(config: AppConfig, request: AgentTurnRequest): boolean {
+  return Boolean(config.agent.gameCompanionEnabled && config.agent.gameCompanionGame === 'minecraft' && request.minecraftStatus);
+}
+
+function hasMinecraftAgentScreenshot(config: AppConfig, request: AgentTurnRequest): boolean {
+  return Boolean(isMinecraftAgentContextRelevant(config, request) && request.minecraftStatus?.lastScreenshot?.dataUrl);
+}
+
 function providerForAgentTurn(config: AppConfig, request: AgentTurnRequest): { provider: ProviderEndpointConfig; supportsVision: boolean } {
   const context = createCoreTurnContext(config, request);
   const screenImageRelevant = Boolean(request.screen?.dataUrl && shouldUseScreenForTurn(request));
   const cameraRelevant = Boolean(request.camera?.dataUrl);
-  const supportsVision = Boolean(context.capabilities.vision && (screenImageRelevant || cameraRelevant));
+  const minecraftImageRelevant = hasMinecraftAgentScreenshot(config, request);
+  const supportsVision = Boolean(context.capabilities.vision && (screenImageRelevant || cameraRelevant || minecraftImageRelevant));
   return {
     provider: supportsVision ? config.provider.vision : config.provider.chat,
     supportsVision
@@ -228,6 +237,38 @@ function formatScreenContext(observation?: ScreenObservation | null): string {
 - 用户活动：${observation.userActivity || '未知'}
 - 下一关注点：${observation.nextFocus || '无'}
 - 是否可能含敏感信息：${observation.sensitive ? '是' : '否'}`;
+}
+
+function formatMinecraftInventory(inventory: Record<string, number>): string {
+  const items = Object.entries(inventory)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 16)
+    .map(([name, count]) => `${name}×${count}`);
+
+  return items.length > 0 ? items.join('、') : '空';
+}
+
+function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolean): string {
+  const status = request.minecraftStatus;
+  if (!status) {
+    return 'Minecraft bot 视角：本轮没有 mc-agent 状态。';
+  }
+
+  return [
+    'Minecraft bot 视角：这是她在游戏里的身体状态，不是用户桌面。',
+    `连接：${status.connected ? '已连接' : '未连接'}；当前任务：${status.pendingTask || '空闲'}`,
+    status.lastLog ? `最近游戏反馈：${status.lastLog}` : '',
+    status.lastInventoryAt > 0 ? `当前背包：${formatMinecraftInventory(status.lastInventory)}` : '当前背包：暂无真实数据',
+    status.lastScreenshot
+      ? includesImage
+        ? `已附上她身体看到的最新一帧，时间：${new Date(status.lastScreenshot.capturedAt).toLocaleString('zh-CN')}。`
+        : '有 mc-agent 最近截图，但当前模型本轮没有接收图片，只能参考文字状态。'
+      : 'mc-agent 还没有发来她身体看到的画面。',
+    !status.connected ? '如果未连接，不要假装她已经能在游戏里移动；只说需要先让 mc-agent 身体进同一个 LAN 世界。' : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
 function actionName(action: AutomationAction): string {
@@ -611,6 +652,8 @@ function buildMessages(
   const screenImageRelevant = supportsVision && screenRequested && Boolean(request.screen?.dataUrl);
   const screenContextRelevant = screenRequested && Boolean(request.screenContext?.summary);
   const cameraRelevant = supportsVision && Boolean(request.camera?.dataUrl);
+  const minecraftContextRelevant = isMinecraftAgentContextRelevant(config, request);
+  const minecraftImageRelevant = supportsVision && hasMinecraftAgentScreenshot(config, request);
   const userText = [
     `用户刚才说：${request.text}`,
     screenImageRelevant && request.screen
@@ -621,6 +664,7 @@ function buildMessages(
     cameraRelevant && request.camera
       ? `用户摄像头画面：${request.camera.sourceName}，尺寸 width=${request.camera.imageSize.width}, height=${request.camera.imageSize.height}，由用户授权开启。可以把它当作你刚看到用户的一帧画面；描述时保持自然、尊重隐私，不要编造画面外信息。`
       : '摄像头上下文：本轮未开启或未提供。',
+    minecraftContextRelevant ? formatMinecraftContext(request, minecraftImageRelevant) : 'Minecraft bot 视角：本轮未提供。',
     screenRequested ? formatScreenContext(request.screenContext) : '屏幕上下文：本轮忽略。',
     formatActionResults(request.previousActionResults),
     extraUserText
@@ -648,6 +692,16 @@ function buildMessages(
       type: 'image_url',
       image_url: {
         url: request.camera.dataUrl,
+        detail: 'low'
+      }
+    });
+  }
+
+  if (minecraftImageRelevant && request.minecraftStatus?.lastScreenshot) {
+    mediaParts.push({
+      type: 'image_url',
+      image_url: {
+        url: request.minecraftStatus.lastScreenshot.dataUrl,
         detail: 'low'
       }
     });

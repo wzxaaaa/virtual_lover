@@ -2867,8 +2867,13 @@ export function App(): ReactElement {
       return;
     }
 
-    if (!config.permissions.screen || !visionProviderReady) {
-      setStatus('游戏陪玩需要屏幕权限和视觉模型');
+    if (!visionProviderReady) {
+      setStatus('游戏陪玩需要视觉模型');
+      return;
+    }
+
+    if (!config.permissions.screen && config.agent.gameCompanionGame !== 'minecraft') {
+      setStatus('游戏陪玩需要屏幕权限');
       return;
     }
 
@@ -2912,6 +2917,11 @@ export function App(): ReactElement {
         enqueueSpeech(cue);
       }
       setStatus(event.result.ok ? 'Minecraft 动作已完成' : 'Minecraft 动作未完成');
+      if (configRef.current.agent.gameCompanionGame === 'minecraft') {
+        window.setTimeout(() => {
+          requestGameCompanionNudge(cue).catch(() => undefined);
+        }, 800);
+      }
       restartListeningAfterSpeech();
     });
   }, [showPetReactionEmotion]);
@@ -3861,6 +3871,30 @@ export function App(): ReactElement {
     }
   }
 
+  async function getMinecraftStatusForTurn(): Promise<MinecraftAgentStatus | null> {
+    if (!configRef.current.agent.gameCompanionEnabled || configRef.current.agent.gameCompanionGame !== 'minecraft') {
+      return null;
+    }
+
+    return window.lover.getMinecraftAgentStatus().catch(() => null);
+  }
+
+  function minecraftStatusToObservation(status: MinecraftAgentStatus | null): ScreenObservation {
+    return {
+      capturedAt: status?.lastScreenshot?.capturedAt ?? Date.now(),
+      sourceName: 'Minecraft Agent',
+      summary: status?.lastLog
+        ? `mc-agent 最近反馈：${status.lastLog}`
+        : status?.connected
+          ? '没有用户屏幕摘要，本轮只参考她在 Minecraft 里的身体状态。'
+          : 'mc-agent 未连接，还没有她在 Minecraft 里的身体画面。',
+      visibleApp: 'Minecraft',
+      userActivity: status?.pendingTask ? `她正在执行：${status.pendingTask}` : '她当前空闲或尚未进入世界。',
+      nextFocus: status?.connected ? '根据她的身体视角和任务状态判断是否继续下一步。' : '先引导用户启动 mc-agent 并让独立账号进入同一个 LAN 世界。',
+      sensitive: false
+    };
+  }
+
   function rememberActionResults(results: ActionResult[]): void {
     if (results.length === 0) {
       return;
@@ -3929,14 +3963,13 @@ export function App(): ReactElement {
     }
   }
 
-  async function requestGameCompanionNudge(): Promise<void> {
+  async function requestGameCompanionNudge(extraMinecraftCue = ''): Promise<void> {
     if (
       gameCompanionBusyRef.current ||
       thinkingRef.current ||
-      speakingRef.current ||
+      (speakingRef.current && !extraMinecraftCue) ||
       activeStreamIdRef.current ||
       !configRef.current.agent.gameCompanionEnabled ||
-      !configRef.current.permissions.screen ||
       !visionProviderReady
     ) {
       return;
@@ -3945,23 +3978,50 @@ export function App(): ReactElement {
     gameCompanionBusyRef.current = true;
 
     try {
-      const previousSummary = screenObservationRef.current?.summary;
-      const observed = await window.lover.observeScreen({
-        previousSummary,
-        actionResults: lastResultsRef.current.slice(-6)
-      });
-      screenObservationRef.current = observed.observation;
-      setScreenPreview(observed.capture);
-      setScreenObservation(observed.observation);
       const minecraftStatus =
-        configRef.current.agent.gameCompanionGame === 'minecraft' ? await window.lover.getMinecraftAgentStatus().catch(() => null) : null;
+        configRef.current.agent.gameCompanionGame === 'minecraft' ? await getMinecraftStatusForTurn() : null;
+      const canUseMinecraftView = Boolean(minecraftStatus?.lastScreenshot);
+      let screen: ScreenCapture | null = null;
+      let observedContext: ScreenObservation | null = null;
+
+      if (configRef.current.permissions.screen) {
+        const previousSummary = screenObservationRef.current?.summary;
+        const observed = await window.lover.observeScreen({
+          previousSummary,
+          actionResults: lastResultsRef.current.slice(-6)
+        });
+        screen = observed.capture;
+        observedContext = observed.observation;
+        screenObservationRef.current = observed.observation;
+        setScreenPreview(observed.capture);
+        setScreenObservation(observed.observation);
+      } else if (canUseMinecraftView) {
+        observedContext = minecraftStatusToObservation(minecraftStatus);
+      } else {
+        setStatus('游戏陪玩需要屏幕权限，或先让 mc-agent 发来游戏画面');
+        return;
+      }
+
+      if (!observedContext) {
+        observedContext = minecraftStatusToObservation(minecraftStatus);
+      }
+
+      const basePrompt = buildGameCompanionPrompt(configRef.current.agent.gameCompanionGame, observedContext, minecraftStatus);
+      const prompt = extraMinecraftCue
+        ? [
+            basePrompt,
+            `刚收到 Minecraft 动作反馈：${extraMinecraftCue}`,
+            '如果刚才已经向用户播报过完成，不要重复复述；只在有新观察、危险、资源变化、路线建议，或需要继续一个非常明确的下一步时回应。'
+          ].join('\n')
+        : basePrompt;
 
       const response = await window.lover.agentTurn({
-        text: buildGameCompanionPrompt(configRef.current.agent.gameCompanionGame, observed.observation, minecraftStatus),
+        text: prompt,
         history: messagesRef.current.slice(-MAX_MESSAGES),
-        screen: observed.capture,
+        screen,
         camera: null,
-        screenContext: observed.observation,
+        minecraftStatus,
+        screenContext: observedContext,
         previousActionResults: lastResultsRef.current.slice(-6)
       });
 
@@ -4308,6 +4368,7 @@ export function App(): ReactElement {
     try {
       const { screen, screenContext } = await captureForTurn(cleanText);
       const camera = await captureCameraForTurn();
+      const minecraftStatus = await getMinecraftStatusForTurn();
       let assistantText = '';
       let finalized = false;
       const request = {
@@ -4315,6 +4376,7 @@ export function App(): ReactElement {
         history: historyForRequest,
         screen,
         camera,
+        minecraftStatus,
         screenContext,
         previousActionResults: lastResultsRef.current.slice(-6)
       };
