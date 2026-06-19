@@ -402,14 +402,24 @@ function formatMinecraftTaskReply(result: AgentToolResult): string {
     case 'error':
       return taskResult.text ? `这一步没做成：${taskResult.text}` : '这一步没做成，你再给我一个更具体的目标。';
     case 'ok':
-      return taskResult.text ? `这步做完了：${taskResult.text}` : '这步做完了。';
+      return formatMinecraftOkCue(taskResult.text);
   }
+}
+
+function formatMinecraftOkCue(text?: string | null): string {
+  if (!text) {
+    return '\u8fd9\u6b65\u505a\u5b8c\u4e86\u3002';
+  }
+  if (/^(Started following|Started command follow|Sleeping in)\b/i.test(text)) {
+    return `\u8fd9\u6b65\u5df2\u7ecf\u5f00\u59cb\uff1a${text}`;
+  }
+  return `\u8fd9\u6b65\u505a\u5b8c\u4e86\uff1a${text}`;
 }
 
 function formatMinecraftTaskFinishedCue(result: MinecraftAgentTaskResult): string | null {
   switch (result.status) {
     case 'ok':
-      return result.text ? `这步做完了：${result.text}` : '这步做完了。';
+      return formatMinecraftOkCue(result.text);
     case 'timeout':
       return '这一步好像卡住了，我先停下等你。';
     case 'blocked':
@@ -524,14 +534,14 @@ function formatMinecraftTaskReplyLegacy(result: AgentToolResult): string {
     case 'error':
       return taskResult.text ? `这一步没做成：${taskResult.text}` : '这一步没做成，你再给我一个更具体的目标。';
     case 'ok':
-      return taskResult.text ? `这步做完了：${taskResult.text}` : '这步做完了。';
+      return formatMinecraftOkCue(taskResult.text);
   }
 }
 
 function formatMinecraftTaskFinishedCueLegacy(result: MinecraftAgentTaskResult): string | null {
   switch (result.status) {
     case 'ok':
-      return result.text ? `这步做完了：${result.text}` : '这步做完了。';
+      return formatMinecraftOkCue(result.text);
     case 'timeout':
       return '这一步好像卡住了，我先停下等你。';
     case 'blocked':

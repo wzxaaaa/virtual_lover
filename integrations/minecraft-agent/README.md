@@ -91,6 +91,7 @@ This starter intentionally keeps the physical layer conservative:
 - query inventory
 - send in-game chat
 - mine a few nearby logs or common ores
+- sleep in a nearby bed when Minecraft allows sleeping
 - attack nearby hostile mobs
 - eat held/available food
 - go near a named or nearest player

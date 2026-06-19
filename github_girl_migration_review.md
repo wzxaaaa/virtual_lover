@@ -221,8 +221,9 @@
 
 - `P17` 已补第三十六段真实联机跟随兜底：实机验证当前 LAN/离线世界里游戏 Tab 能看到 `Steve` 和 `VirtualLoverBot`，但 mineflayer 仍可能回报 `knownPlayers: [] / nearbyPlayers: []`，导致 `/tp` 一次后仍无法进入 `GoalFollow`。本轮把玩家实体识别放宽到 `username/profile/kind`，避免非标准 `entity.type` 漏识别；同时新增 `command_follow_fallback` 能力和 `commandFollow` 状态。当 follow 看不到 Owner 实体但配置了 Owner 时，starter 会进入 `command_following`，按 `behavior.commandFollowIntervalMs` 周期发送 `/tp <bot> <Owner>`，并在后续一旦看到真实玩家实体时自动切回 pathfinder `GoalFollow`。停止、断线、死亡或非跟随任务会清理该循环。适配点：这是当前 LAN 环境下让“跟着我”真的持续生效的保守兜底；它依赖世界允许 bot 执行 `/tp`，且不是自然步行保持 3-5 格，后续仍应优先让外部 mc-agent 稳定输出玩家实体坐标。
 - `P17` 已补第三十七段匿名 Owner 实体跟随：实机抓取 `debug_entities` 发现当前 LAN/离线世界里 `Steve` 不出现在 `bot.players`，但会以 `id=319`、无 `type/name/username`、`size=0x0` 的原始实体贴近 bot。starter 新增 `entity_debug` 能力和 `behavior.ownerEntityId`，并把指定实体包装成 `synthetic` Owner；`follow me` 现在可直接进入 pathfinder `GoalFollow`，状态显示 `trackedPlayer.name=Steve / entityId=319 / synthetic=true / path.status=following / commandFollow=null`，不再依赖周期 `/tp`。同时修复 `mineflayer-pathfinder` ESM 下 `goals` 位于 default export 的导入兼容问题。适配点：这是对当前世界的实体映射兜底；若重进世界实体 id 改变，可重新用 `debug_entities` 找最近的匿名 Owner 实体，或依赖后续自动贴身匿名实体探测。
+- `P17` 已补第三十八段中文任务路由与基础物理动作修复：实机发现“把这棵树砍吧”只命中泛化动作信号，没有命中 `砍树` 预设，最终被降级成 `follow this Minecraft player request`；“睡上这张床”虽能翻成 sleep task，但 starter 没有 sleep/bed 分支，最终默认 `goNearPlayer()`，所以 UI 显示完成但游戏无效。本轮新增 `砍.*树 / 树.*砍 / 这棵树 / 那棵树` 和 `睡.*床 / 床.*睡 / 躺.*床 / 上床 / 这张床` 预设，starter 新增 `sleepInBed()`，会找附近床、走到床边并调用 `bot.sleep()`；非睡觉任务会先 `wake()`。伐木搜索也从只围绕 bot 扩展为优先围绕 Owner/synthetic Owner 位置扫描已加载方块，再回退 mineflayer `findBlock()`。实机验证：中文路由输出 `collect wood...` / `sleep in a bed...`；真实 starter 已执行 `Dug 4 wood blocks.`；白天睡床会返回真实 blocked：`Cannot sleep in yellow_bed: it's not night and it's not a thunderstorm`，不再假装完成。UI 完成提示同步区分持续动作：`Started following...` / `Sleeping in...` 显示“这步已经开始”，挖完木头仍显示“这步做完了”。
 
-当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.9%，完整游戏 Agent 自主玩法约 95.4%。
+当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.92%，完整游戏 Agent 自主玩法约 95.6%。
 
 ## Agent / Minecraft 剩余缺口
 

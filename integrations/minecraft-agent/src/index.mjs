@@ -765,12 +765,54 @@ function requireBot() {
   }
 }
 
+async function wakeIfSleeping() {
+  if (!bot?.isSleeping) return;
+  try {
+    await bot.wake();
+  } catch (error) {
+    log(`Could not wake before the next task: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function nearestHostile(maxDistance = 8) {
   return Object.values(bot.entities)
     .filter((entity) => entity && entity !== bot.entity && HOSTILE_NAMES.has(String(entity.name || '').toLowerCase()))
     .map((entity) => ({ entity, distance: distanceToBot(entity) ?? 9999 }))
     .filter(({ distance }) => distance <= maxDistance)
     .sort((a, b) => a.distance - b.distance)[0]?.entity;
+}
+
+function ownerOrBotPosition() {
+  return findOwnerOrNearestPlayer()?.player?.entity?.position || bot?.entity?.position || null;
+}
+
+function findKnownBlockNear(blockIds, origin, radius) {
+  if (!bot || !origin) return null;
+  const blockSet = new Set(blockIds);
+  const center = origin.floored ? origin.floored() : origin;
+  const horizontalRadius = Math.max(1, Math.floor(radius));
+  const minY = -5;
+  const maxY = 12;
+  let best = null;
+
+  for (let dx = -horizontalRadius; dx <= horizontalRadius; dx += 1) {
+    for (let dz = -horizontalRadius; dz <= horizontalRadius; dz += 1) {
+      if (Math.sqrt(dx * dx + dz * dz) > horizontalRadius) continue;
+      for (let dy = minY; dy <= maxY; dy += 1) {
+        const position = center.offset(dx, dy, dz);
+        const block = bot.blockAt(position);
+        if (!block || !blockSet.has(block.type)) continue;
+        const originDistance = origin.distanceTo(block.position);
+        const botDistance = bot.entity.position.distanceTo(block.position);
+        const score = originDistance + botDistance * 0.15;
+        if (!best || score < best.score) {
+          best = { block, score };
+        }
+      }
+    }
+  }
+
+  return best?.block || null;
 }
 
 function taskIncludes(text, words) {
@@ -1013,13 +1055,19 @@ function cryptoRandomId() {
 async function executeTask(text) {
   const lower = text.toLowerCase();
   const followIntent = hasFollowIntent(lower);
+  const sleepIntent = taskIncludes(lower, ['sleep', 'bed', 'night']);
 
   if (shouldStopTask(lower)) {
     bot.pathfinder.setGoal(null);
     bot.clearControlStates();
+    await wakeIfSleeping();
     clearCommandFollow();
     pathState = { status: 'idle', updatedAt: now() };
     return 'Stopped and waiting.';
+  }
+
+  if (!sleepIntent) {
+    await wakeIfSleeping();
   }
 
   if (!followIntent) {
@@ -1045,6 +1093,10 @@ async function executeTask(text) {
 
   if (taskIncludes(lower, ['attack', 'fight', 'protect', 'kill hostile', 'zombie', 'skeleton', 'creeper'])) {
     return attackNearestHostile();
+  }
+
+  if (sleepIntent) {
+    return sleepInBed();
   }
 
   if (followIntent) {
@@ -1153,6 +1205,64 @@ async function goNearPlayer() {
   return `Regrouped near ${target.name}.`;
 }
 
+async function sleepInBed() {
+  const bed = bot.findBlock({
+    matching: (block) => Boolean(block?.name?.endsWith('_bed')),
+    maxDistance: Math.max(8, config.behavior.searchRadius)
+  });
+
+  if (!bed) {
+    throw new Error('No bed found nearby.');
+  }
+
+  pathState = {
+    status: 'moving',
+    target: {
+      type: 'block',
+      name: bed.name,
+      position: vecToPlain(bed.position),
+      distance: Number(bot.entity.position.distanceTo(bed.position).toFixed(2))
+    },
+    updatedAt: now()
+  };
+  publishStatus();
+  await bot.pathfinder.goto(new goals.GoalNear(bed.position.x, bed.position.y, bed.position.z, 2));
+
+  const freshBed = bot.blockAt(bed.position) || bed;
+  pathState = {
+    status: 'sleeping',
+    target: {
+      type: 'block',
+      name: freshBed.name,
+      position: vecToPlain(freshBed.position),
+      distance: Number(bot.entity.position.distanceTo(freshBed.position).toFixed(2))
+    },
+    updatedAt: now()
+  };
+  publishStatus();
+
+  try {
+    await bot.sleep(freshBed);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    pathState = {
+      status: 'blocked',
+      target: {
+        type: 'block',
+        name: freshBed.name,
+        position: vecToPlain(freshBed.position),
+        error: message
+      },
+      updatedAt: now()
+    };
+    publishStatus();
+    throw new Error(`Cannot sleep in ${freshBed.name}: ${message}`);
+  }
+
+  publishStatus();
+  return { text: `Sleeping in ${freshBed.name}.`, keepPathState: true };
+}
+
 async function digBlocks(names, label) {
   const blocks = names.map((name) => mcData.blocksByName[name]?.id).filter(Boolean);
   if (!blocks.length) {
@@ -1161,10 +1271,12 @@ async function digBlocks(names, label) {
 
   let dug = 0;
   for (let index = 0; index < config.behavior.maxDigBlocksPerTask; index += 1) {
-    const block = bot.findBlock({
-      matching: blocks,
-      maxDistance: config.behavior.searchRadius
-    });
+    const block =
+      findKnownBlockNear(blocks, ownerOrBotPosition(), config.behavior.searchRadius) ||
+      bot.findBlock({
+        matching: blocks,
+        maxDistance: config.behavior.searchRadius
+      });
     if (!block) {
       if (dug === 0) throw new Error(`${label} not found nearby.`);
       break;

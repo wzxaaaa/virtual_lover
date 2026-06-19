@@ -47,6 +47,8 @@ const MINECRAFT_TASK_SIGNAL_RE =
   /帮我|替我|让(?:她|你|ai|AI|猫猫)?|叫(?:她|你)|去|开始|继续|执行|挖|采|砍|收集|探索|跑|跟着|跟随|攻击|打|回家|睡觉|吃|找|制作|合成|整理|走|往|躲|避开|杀|防御|保护|掩护|等待|等我|守住|别挡|让开|保持距离|分工|分头|箱子|共享|带路|种|钓|交易|装备|熔炼|烧|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come|guard|protect|cover|chest|storage|container|deposit/i;
 
 const MINECRAFT_TASK_PRESETS: Array<[RegExp, string]> = [
+  [/(?:\u780d.*\u6811|\u6811.*\u780d|\u8fd9\u68f5\u6811|\u90a3\u68f5\u6811|\u4f10\u6728|\u6728\u5934|\u539f\u6728|wood|tree)/i, 'collect wood by chopping nearby trees, then stop somewhere safe'],
+  [/(?:\u7761.*\u5e8a|\u5e8a.*\u7761|\u8eba.*\u5e8a|\u4e0a\u5e8a|\u8fd9\u5f20\u5e8a|night|sleep|bed)/i, 'sleep in a bed if it is night and a bed is available'],
   [/(别挡|挡路|让开|站旁边|离我远|保持距离|不要挡|别堵|keep distance|don't block|dont block|move aside|out of my way)/i, 'move to the side of the player, keep a respectful 4 block distance, and do not block the player view or path'],
   [/(跟着我|跟随我|跟我|跟紧|过来跟|follow|come)/i, 'follow the player at a safe 3 to 5 block distance, stay out of the player line of sight, and stop or wait if the route is unsafe'],
   [/(保护我|护着我|掩护我|看着我|守住我|帮我打怪|cover me|guard me|protect me)/i, 'guard the player from nearby hostile mobs while keeping 3 to 5 blocks of distance and avoiding friendly obstruction'],
