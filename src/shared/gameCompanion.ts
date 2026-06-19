@@ -21,6 +21,10 @@ export type MinecraftPluginTextIntent =
       type: 'inventory';
     }
   | {
+      type: 'chat';
+      text: string;
+    }
+  | {
       type: 'status';
     };
 
@@ -35,6 +39,8 @@ const MINECRAFT_CONTEXT_RE = /我的世界|minecraft|mc-agent|mc代理|\bmc\b/i;
 const MINECRAFT_INVENTORY_RE = /背包|物品栏|inventory|身上.*(?:有什么|有啥|多少|物品)|(?:查|看|看看).*(?:物品|资源|背包)/i;
 const MINECRAFT_STATUS_RE =
   /(?:状态|进度|任务|代理|agent).*(?:怎么样|怎样|如何|完成|连上|是什么)|(?:当前|现在).*(?:任务|状态|进度)|(?:你|她).*(?:进游戏|在游戏|能不能动|能动吗|能控制)/i;
+const MINECRAFT_CHAT_RE =
+  /(?:在|到)?(?:游戏|我的世界|minecraft|mc).*?(?:说|发|回复|喊|打字|chat)|(?:说|发|回复|喊|打字).*?(?:游戏|我的世界|minecraft|mc|聊天|chat)/i;
 const MINECRAFT_STOP_TASK_RE = /(?:停止|取消|中断|打断|停下|别做).*(?:任务|动作|操作|当前|挖|砍|找|走)|(?:先停|停一下|别动了|别动)/i;
 const MINECRAFT_TASK_SIGNAL_RE =
   /帮我|替我|让(?:她|你|ai|AI|猫猫)?|叫(?:她|你)|去|开始|继续|执行|挖|采|砍|收集|探索|跑|跟着|攻击|打|回家|睡觉|吃|找|制作|合成|整理|走|往|躲|避开|杀|防御|等待|守住|种|钓|交易|装备|熔炼|烧|mine|dig|chop|collect|find|build|craft|follow|attack|explore|return|go|stop|come/i;
@@ -65,6 +71,35 @@ function compactMinecraftTaskText(text: string): string {
     .replace(/^(请|麻烦|拜托|可以|能不能|你可以|帮我|替我|让她|让你|叫她|叫你|去|在游戏里|在我的世界里)+/i, '')
     .replace(/[。！？!?]+$/g, '')
     .trim();
+}
+
+function minecraftChatText(text: string): string | null {
+  const quoted = /[“"'「『]([^“”"'「」『』]{1,160})[”"'」』]/.exec(text);
+  if (quoted?.[1]?.trim()) {
+    return quoted[1].trim();
+  }
+
+  const afterVerb = /(?:说|发|回复|喊|打字|chat)(?:一下|一句|消息|聊天|给他们|给队友|给玩家)?[:：，, ]*(.{1,160})$/i.exec(text);
+  if (afterVerb?.[1]?.trim()) {
+    const directText = afterVerb[1]
+      .replace(MINECRAFT_CONTEXT_RE, '')
+      .replace(/^(里|中|内|游戏里|游戏中|游戏内|聊天里|聊天中|聊天内)[:：，, ]*/i, '')
+      .replace(/[。！？!?]+$/g, '')
+      .trim();
+    if (directText) {
+      return directText;
+    }
+  }
+
+  const cleaned = text
+    .replace(MINECRAFT_CONTEXT_RE, '')
+    .replace(/^(请|麻烦|拜托|可以|能不能|你可以|让她|让你|叫她|叫你|在游戏里|在我的世界里|在mc里|在minecraft里|到游戏里)?/i, '')
+    .replace(/^(说|发|回复|喊|打字|chat)(一下|一句|消息|聊天|给他们|给队友|给玩家)?[:：，, ]*/i, '')
+    .replace(/^(在游戏里|在我的世界里|在mc里|在minecraft里)?(说|发|回复|喊|打字|chat)(一下|一句|消息|聊天)?[:：，, ]*/i, '')
+    .replace(/[。！？!?]+$/g, '')
+    .trim();
+
+  return cleaned.length > 0 && cleaned.length <= 160 ? cleaned : null;
 }
 
 function normalizeMinecraftTask(text: string): string | null {
@@ -158,6 +193,18 @@ function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null)
   return parts.length > 0 ? `身体状态：${parts.join('；')}` : '';
 }
 
+function formatMinecraftRecentChat(status: MinecraftAgentStatus): string {
+  const messages = status.lastChatMessages ?? [];
+  if (!messages.length) {
+    return '';
+  }
+
+  return `最近聊天：${messages
+    .slice(-4)
+    .map((message) => `${message.sender || (message.outgoing ? '我' : '玩家')}：${message.text}`)
+    .join(' / ')}`;
+}
+
 export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null): string {
   if (!status) {
     return 'Minecraft Agent：尚未查询。';
@@ -178,6 +225,7 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleTimeString('zh-CN')}`
       : '',
     status.lastLog ? `最近反馈：${status.lastLog}` : '',
+    formatMinecraftRecentChat(status),
     formatMinecraftWorldState(status.worldState),
     inventoryItems ? `背包：${inventoryItems}` : status.lastInventoryAt > 0 ? '背包：空' : '',
     !status.connected ? '提示：还没有连接到她的 Minecraft 身体，需要先启动 mc-agent，并让独立账号进入同一个 LAN 世界。' : ''
@@ -256,6 +304,13 @@ export function getMinecraftPluginTextIntent(text: string, gameCompanionEnabled:
 
   if (MINECRAFT_STATUS_RE.test(cleanText) && (gameCompanionEnabled || mentionsMinecraft)) {
     return { type: 'status' };
+  }
+
+  if (MINECRAFT_CHAT_RE.test(cleanText)) {
+    const text = minecraftChatText(cleanText);
+    if (text) {
+      return { type: 'chat', text };
+    }
   }
 
   const hasTaskSignal = MINECRAFT_TASK_SIGNAL_RE.test(cleanText) || MINECRAFT_STOP_TASK_RE.test(cleanText);

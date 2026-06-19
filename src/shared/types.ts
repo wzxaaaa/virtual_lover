@@ -304,6 +304,14 @@ export interface MinecraftAgentAlert {
   receivedAt: number;
 }
 
+export interface MinecraftAgentChatMessage {
+  text: string;
+  sender?: string;
+  role: 'player' | 'bot' | 'system' | 'unknown';
+  outgoing: boolean;
+  receivedAt: number;
+}
+
 export interface MinecraftAgentPosition {
   x: number;
   y: number;
@@ -389,6 +397,7 @@ export interface MinecraftAgentStatus {
   lastInventory: Record<string, number>;
   lastInventoryAt: number;
   worldState: MinecraftAgentWorldState | null;
+  lastChatMessages: MinecraftAgentChatMessage[];
   lastNudgeKind: MinecraftAgentNudge['kind'] | null;
   lastNudgeAt: number;
   lastError: string | null;
@@ -422,6 +431,14 @@ export interface MinecraftAgentInventoryResponse {
   error?: string;
 }
 
+export interface MinecraftAgentChatResult {
+  ok: boolean;
+  text: string;
+  summary: string;
+  sentAt?: number;
+  error?: string;
+}
+
 export interface MinecraftAgentNudge {
   kind: 'in_progress' | 'keep_going';
   cue: string;
@@ -441,6 +458,10 @@ export type MinecraftAgentEvent =
   | {
       type: 'alert';
       alert: MinecraftAgentAlert;
+    }
+  | {
+      type: 'chat';
+      message: MinecraftAgentChatMessage;
     }
   | {
       type: 'screenshot';

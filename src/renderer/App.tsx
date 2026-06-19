@@ -198,7 +198,7 @@ const MULTISCREEN_DRAG_HINT_TEXT = {
 };
 const SCREEN_AUTO_OBSERVE_RE =
   /屏幕|桌面|电脑|窗口|界面|截图|显示器|监视器|当前画面|你.*(看到|看见|看得到|看得见)|看.*(屏幕|桌面|电脑|窗口|界面|画面)|观察.*(屏幕|桌面|电脑|窗口|界面)/i;
-const AUTO_PLUGIN_TOOL_IDS = new Set(['plugin.minecraft_task', 'plugin.query_inventory', 'plugin.game_agent_status']);
+const AUTO_PLUGIN_TOOL_IDS = new Set(['plugin.minecraft_task', 'plugin.minecraft_chat', 'plugin.query_inventory', 'plugin.game_agent_status']);
 
 function isMinecraftAgentStatus(value: unknown): value is MinecraftAgentStatus {
   return value !== null && typeof value === 'object' && 'connected' in value && 'pendingTask' in value && 'lastInventory' in value;
@@ -3062,6 +3062,18 @@ export function App(): ReactElement {
         return;
       }
 
+      if (event.type === 'chat') {
+        const speaker = event.message.sender || (event.message.outgoing ? '我' : event.message.role === 'system' ? '系统' : '玩家');
+        const cue = `[游戏内聊天]\n${speaker}: ${event.message.text}\n如果这是用户或队友在游戏里对你说话，就自然回应；需要在 MC 里回一句时调用 Minecraft 聊天工具，别把工具名说出来。`;
+        setStatus('Minecraft 游戏聊天');
+        if (configRef.current.agent.gameCompanionGame === 'minecraft') {
+          window.setTimeout(() => {
+            requestGameCompanionNudge(cue).catch(() => undefined);
+          }, 180);
+        }
+        return;
+      }
+
       if (event.type !== 'taskFinished') {
         return;
       }
@@ -4295,6 +4307,8 @@ export function App(): ReactElement {
         result = await window.lover.invokeAgentTool({ toolId: 'plugin.query_inventory', input: {} });
       } else if (intent.type === 'status') {
         result = await window.lover.invokeAgentTool({ toolId: 'plugin.game_agent_status', input: {} });
+      } else if (intent.type === 'chat') {
+        result = await window.lover.invokeAgentTool({ toolId: 'plugin.minecraft_chat', input: { text: intent.text } });
       } else {
         result = await window.lover.invokeAgentTool({
           toolId: 'plugin.minecraft_task',
@@ -4313,7 +4327,11 @@ export function App(): ReactElement {
             : '我现在还查不到背包，只能先看着画面陪你。'
           : intent.type === 'status'
             ? formatMinecraftStatusReply(result)
-            : formatMinecraftTaskReply(result);
+            : intent.type === 'chat'
+              ? result.ok
+                ? '我在游戏里发了。'
+                : '我现在还发不到游戏聊天。'
+              : formatMinecraftTaskReply(result);
       appendMinecraftPluginExchange(text, reply, result.ok ? 'focused' : 'concerned');
       setStatus(result.ok ? 'Minecraft 插件已响应' : 'Minecraft 插件未完成');
     } catch (error) {
@@ -4346,6 +4364,8 @@ export function App(): ReactElement {
         let followup = '';
         if (call.toolId === 'plugin.minecraft_task') {
           followup = result.ok ? '' : formatMinecraftTaskReply(result);
+        } else if (call.toolId === 'plugin.minecraft_chat') {
+          followup = result.ok ? '' : '我现在还发不到游戏聊天。';
         } else if (call.toolId === 'plugin.query_inventory') {
           followup = result.ok ? result.message : '我现在还查不到背包，只能先看着画面陪你。';
         } else if (call.toolId === 'plugin.game_agent_status') {

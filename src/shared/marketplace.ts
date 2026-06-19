@@ -77,8 +77,8 @@ export const BUILTIN_MCP_SERVERS: MarketplaceItem[] = [
     status: 'installed',
     builtin: true,
     tags: ['Minecraft', 'mineflayer', '第二玩家', 'WebSocket'],
-    capabilities: ['minecraft_task', 'query_inventory', 'game_agent_status'],
-    entrypoints: ['minecraft:agentStatus', 'minecraft:agentTask', 'minecraft:agentInventory']
+    capabilities: ['minecraft_task', 'minecraft_chat', 'query_inventory', 'game_agent_status'],
+    entrypoints: ['minecraft:agentStatus', 'minecraft:agentTask', 'minecraft:agentChat', 'minecraft:agentInventory']
   },
   {
     id: 'mcp.desktop-control',

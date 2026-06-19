@@ -3,6 +3,8 @@ import { EventEmitter } from 'node:events';
 import { nativeImage } from 'electron';
 import type {
   AppConfig,
+  MinecraftAgentChatMessage,
+  MinecraftAgentChatResult,
   MinecraftAgentEvent,
   MinecraftAgentDangerState,
   MinecraftAgentInventoryResponse,
@@ -36,6 +38,7 @@ const CONNECT_WAIT_MS = 3000;
 const RECONNECT_INTERVAL_MS = 5000;
 const LOG_CACHE_LIMIT = 200;
 const SCREENSHOT_CACHE_LIMIT = 3;
+const CHAT_CACHE_LIMIT = 30;
 const DISPATCH_HISTORY_LIMIT = 32;
 const SCREENSHOT_MAX_EDGE_PX = 1024;
 const SCREENSHOT_MAX_BYTES = 100 * 1024;
@@ -769,6 +772,49 @@ function taskSummary(result: MinecraftAgentTaskResult): string {
   return `Minecraft 动作失败：${result.query}`;
 }
 
+function normalizeChatRole(value: unknown, outgoing: boolean): MinecraftAgentChatMessage['role'] {
+  const role = stringOrEmpty(value).toLowerCase();
+  if (outgoing || role === 'bot' || role === 'self' || role === 'assistant') {
+    return 'bot';
+  }
+  if (role === 'player' || role === 'user' || role === 'human') {
+    return 'player';
+  }
+  if (role === 'system' || role === 'server') {
+    return 'system';
+  }
+  return 'unknown';
+}
+
+function chatMessageFromFrame(frame: Record<string, unknown>): MinecraftAgentChatMessage | null {
+  const text =
+    stringOrEmpty(frame.text) || stringOrEmpty(frame.message) || stringOrEmpty(frame.content) || stringOrEmpty(frame.data);
+  if (!text.trim()) {
+    return null;
+  }
+
+  const sender =
+    stringOrUndefined(frame.sender) ||
+    stringOrUndefined(frame.player) ||
+    stringOrUndefined(frame.username) ||
+    stringOrUndefined(frame.name) ||
+    stringOrUndefined(frame.from);
+  const outgoing = frame.outgoing === true || frame.direction === 'outgoing';
+
+  return {
+    text: text.trim().slice(0, 500),
+    ...(sender ? { sender } : {}),
+    role: normalizeChatRole(frame.role ?? frame.kind ?? frame.source, outgoing),
+    outgoing,
+    receivedAt: Date.now()
+  };
+}
+
+function formatChatLine(message: MinecraftAgentChatMessage): string {
+  const speaker = message.sender || (message.outgoing ? '我' : message.role === 'system' ? '系统' : '玩家');
+  return `${speaker}: ${message.text}`;
+}
+
 class MinecraftAgentService {
   private wsUrl = DEFAULT_WS_URL;
   private running = false;
@@ -781,6 +827,7 @@ class MinecraftAgentService {
   private activeGoalUpdatedAt = 0;
   private logCache: string[] = [];
   private screenshotCache: MinecraftAgentScreenshot[] = [];
+  private chatCache: MinecraftAgentChatMessage[] = [];
   private lastInventory: Record<string, number> = {};
   private lastInventoryAt = 0;
   private worldState: MinecraftAgentWorldState | null = null;
@@ -835,6 +882,7 @@ class MinecraftAgentService {
     this.activeGoal = null;
     this.activeGoalUpdatedAt = 0;
     this.worldState = null;
+    this.chatCache = [];
 
     const socket = this.socket;
     this.socket = null;
@@ -870,6 +918,7 @@ class MinecraftAgentService {
       lastInventory: { ...this.lastInventory },
       lastInventoryAt: this.lastInventoryAt,
       worldState: cloneWorldState(this.worldState),
+      lastChatMessages: this.chatCache.map((message) => ({ ...message })),
       lastNudgeKind: this.lastNudgeKind,
       lastNudgeAt: this.lastNudgeAt,
       lastError: this.lastError
@@ -1033,6 +1082,54 @@ class MinecraftAgentService {
     }
 
     return this.cachedInventoryResponse(this.lastInventoryAt > 0 ? 'cached' : 'none', this.lastError ?? 'Minecraft Agent 未连接。');
+  }
+
+  async sendChat(config: AppConfig, text: string): Promise<MinecraftAgentChatResult> {
+    const cleanText = text.trim().slice(0, 240);
+    if (!cleanText) {
+      return {
+        ok: false,
+        text: '',
+        summary: 'Minecraft 聊天内容不能为空。',
+        error: 'Empty chat message.'
+      };
+    }
+
+    this.start(config);
+    if (!(await this.waitForConnection(CONNECT_WAIT_MS))) {
+      return {
+        ok: false,
+        text: cleanText,
+        summary: '本地 Minecraft Agent 还没有连接。',
+        error: this.lastError ?? 'WebSocket is not connected.'
+      };
+    }
+
+    const sentAt = Date.now();
+    const sent = this.sendJson({ type: 'chat', text: cleanText, message: cleanText });
+    if (!sent) {
+      return {
+        ok: false,
+        text: cleanText,
+        summary: 'Minecraft 游戏内聊天发送失败。',
+        error: this.lastError ?? 'WebSocket send failed.'
+      };
+    }
+
+    this.pushChat({
+      text: cleanText,
+      role: 'bot',
+      outgoing: true,
+      receivedAt: sentAt
+    });
+    this.emitStatus();
+
+    return {
+      ok: true,
+      text: cleanText,
+      sentAt,
+      summary: `Minecraft 游戏内聊天已发送：${cleanText}`
+    };
   }
 
   private busyResult(): MinecraftAgentTaskResult {
@@ -1349,6 +1446,17 @@ class MinecraftAgentService {
       return;
     }
 
+    if (type === 'chat' || type === 'game_chat' || type === 'player_chat' || type === 'message') {
+      const message = chatMessageFromFrame(frame);
+      if (message) {
+        this.pushChat(message);
+        this.pushLog(`[chat] ${formatChatLine(message)}`);
+        this.events.emit('event', { type: 'chat', message } satisfies MinecraftAgentEvent);
+        this.emitStatus();
+      }
+      return;
+    }
+
     if (type === 'inventory') {
       const inventory = normalizeInventory(frame.inventory ?? frame.items ?? frame.data) ?? {};
       this.updateInventory(inventory);
@@ -1479,6 +1587,11 @@ class MinecraftAgentService {
     this.logCache = this.logCache.slice(-LOG_CACHE_LIMIT);
   }
 
+  private pushChat(message: MinecraftAgentChatMessage): void {
+    this.chatCache.push({ ...message });
+    this.chatCache = this.chatCache.slice(-CHAT_CACHE_LIMIT);
+  }
+
   private updateInventory(inventory: Record<string, number>): void {
     this.lastInventory = { ...inventory };
     this.lastInventoryAt = Date.now();
@@ -1553,6 +1666,10 @@ export async function sendMinecraftAgentTask(config: AppConfig, request: Minecra
 
 export async function dispatchMinecraftAgentTask(config: AppConfig, request: MinecraftAgentTaskRequest): Promise<MinecraftAgentTaskResult> {
   return minecraftAgentService.dispatchTask(config, request);
+}
+
+export async function sendMinecraftAgentChat(config: AppConfig, text: string): Promise<MinecraftAgentChatResult> {
+  return minecraftAgentService.sendChat(config, text);
 }
 
 export async function queryMinecraftAgentInventory(config: AppConfig, timeoutMs?: number): Promise<MinecraftAgentInventoryResponse> {

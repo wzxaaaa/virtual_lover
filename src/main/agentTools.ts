@@ -1,6 +1,6 @@
 import { executeAutomationAction } from './automation';
 import { getDateTimeSnapshot } from './datetime';
-import { dispatchMinecraftAgentTask, getMinecraftAgentStatus, queryMinecraftAgentInventory } from './minecraftAgent';
+import { dispatchMinecraftAgentTask, getMinecraftAgentStatus, queryMinecraftAgentInventory, sendMinecraftAgentChat } from './minecraftAgent';
 import type { AgentToolCall, AgentToolDefinition, AgentToolResult } from '../shared/agentTools';
 import { AUTOMATION_TOOL_IDS, toolIdForAutomationAction } from '../shared/agentTools';
 import { formatMinecraftAgentStatus } from '../shared/gameCompanion';
@@ -205,6 +205,40 @@ registerAgentTool(
       overwrite: input.overwrite === true
     });
 
+    return {
+      ok: result.ok,
+      toolId: call.toolId,
+      callId: call.id,
+      message: result.summary,
+      output: result,
+      error: result.ok ? undefined : result.error ?? result.summary
+    };
+  }
+);
+
+registerAgentTool(
+  {
+    id: 'plugin.minecraft_chat',
+    namespace: 'plugin',
+    name: 'Minecraft chat',
+    description: 'Send one short in-game chat message through the local mc-agent.',
+    inputSchema: schema(
+      {
+        text: { type: 'string', description: 'Short in-game chat message to send.' }
+      },
+      ['text']
+    ),
+    resultKind: 'data',
+    safety: 'auto',
+    requiresApproval: false,
+    permissions: []
+  },
+  async (input, context, call) => {
+    if (!isRecord(input) || typeof input.text !== 'string' || !input.text.trim()) {
+      return invalidInputResult(call, 'text string');
+    }
+
+    const result = await sendMinecraftAgentChat(context.config, input.text);
     return {
       ok: result.ok,
       toolId: call.toolId,

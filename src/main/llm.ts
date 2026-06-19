@@ -7,6 +7,7 @@ import {
   ConversationMessage,
   ActionResult,
   MemoryState,
+  MinecraftAgentChatMessage,
   MinecraftAgentDangerState,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
@@ -69,9 +70,18 @@ interface RawScreenObservation {
 }
 
 const MOODS: Mood[] = ['neutral', 'happy', 'thinking', 'focused', 'concerned'];
-const MINECRAFT_AGENT_TOOL_IDS = new Set(['plugin.minecraft_task', 'plugin.query_inventory', 'plugin.game_agent_status']);
+const MINECRAFT_AGENT_TOOL_IDS = new Set([
+  'plugin.minecraft_task',
+  'plugin.minecraft_chat',
+  'plugin.query_inventory',
+  'plugin.game_agent_status'
+]);
 const MINECRAFT_AGENT_TOOL_NAME_TO_ID: Record<string, string> = {
   minecraft_task: 'plugin.minecraft_task',
+  minecraft_chat: 'plugin.minecraft_chat',
+  game_chat: 'plugin.minecraft_chat',
+  chat: 'plugin.minecraft_chat',
+  say: 'plugin.minecraft_chat',
   query_inventory: 'plugin.query_inventory',
   game_agent_status: 'plugin.game_agent_status',
   agent_status: 'plugin.game_agent_status'
@@ -332,6 +342,20 @@ function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null)
   return parts.length > 0 ? `身体状态：${parts.join('；')}。更新时间：${new Date(worldState.updatedAt).toLocaleString('zh-CN')}。` : '身体状态：暂无真实数据。';
 }
 
+function formatMinecraftChat(messages: MinecraftAgentChatMessage[]): string {
+  if (!messages.length) {
+    return '暂无。';
+  }
+
+  return messages
+    .slice(-6)
+    .map((message) => {
+      const speaker = message.sender || (message.outgoing ? '我' : message.role === 'system' ? '系统' : '玩家');
+      return `${speaker}: ${message.text}`;
+    })
+    .join(' / ');
+}
+
 function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolean): string {
   const status = request.minecraftStatus;
   if (!status) {
@@ -342,6 +366,7 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
     'Minecraft bot 视角：这是她在游戏里的身体状态，不是用户桌面。',
     `连接：${status.connected ? '已连接' : '未连接'}；当前任务：${status.pendingTask || '空闲'}`,
     status.activeGoal ? `这一局当前目标：${status.activeGoal}` : '这一局当前目标：暂无。',
+    `最近游戏聊天：${formatMinecraftChat(status.lastChatMessages ?? [])}`,
     status.lastLog ? `最近游戏反馈：${status.lastLog}` : '',
     status.lastNudgeAt > 0
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleString('zh-CN')}。`
@@ -395,6 +420,7 @@ function minecraftToolPrompt(config: AppConfig): string {
 
   return `Minecraft MCP 工具：
 - plugin.minecraft_task：当你要让游戏角色执行一个具体动作时调用。input: { "task": "one concrete executable Minecraft goal in English", "goal": "optional player-facing current goal", "overwrite": false }。这是后台派发，用户不会直接看到工具名。
+- plugin.minecraft_chat：当你要让游戏角色在 MC 聊天里发一句短消息时调用。input: { "text": "short in-game chat, no tool names" }。
 - plugin.query_inventory：当用户问背包/物品，或你需要真实库存才能回答时调用。input: {}。
 - plugin.game_agent_status：当用户问当前游戏代理/任务状态，或你需要知道是否空闲时调用。input: {}。
 
@@ -404,7 +430,8 @@ Minecraft 工具规则：
 3. task 必须具体、可执行、短，不要写抽象愿望；优先英文，例如 "collect wood by chopping nearby trees, then stop somewhere safe"。
 4. goal 用来描述这一局持续追的目标，可以直接用用户原话或短中文总结；如果只是查状态/背包，不要写 goal。
 5. overwrite 只用于“停下/别做/换成/改去/过来”等明确纠正；不要因为你想到更优路线就覆盖。刚下发不到 2 秒的新任务会被保护，别连续刷覆盖。
-6. reply 给用户听时不要说“工具”“tool”“minecraft_task”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
+6. minecraft_chat 只在用户让你在游戏里说话/回复，或队友游戏聊天需要你短句回应时使用；不要每轮普通桌面对话都发游戏聊天。聊天内容保持很短，中文不超过 80 字，英文不超过 120 字。
+7. reply 给用户听时不要说“工具”“tool”“minecraft_task”“minecraft_chat”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
 }
 
 function systemPrompt(config: AppConfig): string {
@@ -578,6 +605,16 @@ function normalizeToolInput(toolId: string, rawInput: unknown, rawCall: Record<s
       goal: typeof input.goal === 'string' && input.goal.trim() ? input.goal.trim().slice(0, 300) : undefined,
       overwrite: input.overwrite === true
     };
+  }
+
+  if (toolId === 'plugin.minecraft_chat') {
+    const text =
+      typeof input.text === 'string' ? input.text.trim() : typeof input.message === 'string' ? input.message.trim() : '';
+    if (!text) {
+      return null;
+    }
+
+    return { text: text.slice(0, 240) };
   }
 
   return {};
