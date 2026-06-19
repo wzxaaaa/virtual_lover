@@ -16,6 +16,7 @@ const CAPABILITIES = [
   'world_join_state',
   'game_chat',
   'command_follow_fallback',
+  'entity_debug',
   'shared_containers',
   'block_interaction'
 ];
@@ -364,6 +365,63 @@ function nearbyEntities() {
     .slice(0, 12);
 }
 
+function debugEntitySummary(entity) {
+  const playerEntry = Object.entries(bot?.players || {}).find(([, player]) => player?.entity === entity);
+  const distance = distanceToBot(entity);
+  return {
+    id: entity?.id ?? null,
+    type: entity?.type || null,
+    kind: entity?.kind || null,
+    name: textValue(entity?.name).trim() || null,
+    username: textValue(entity?.username).trim() || null,
+    displayName: textValue(entity?.displayName).trim() || null,
+    profileName: textValue(entity?.profile?.name).trim() || null,
+    playerTableName: playerEntry?.[0] || null,
+    isPlayerLike: isPlayerEntity(entity),
+    distance: distance === null ? null : Number(distance.toFixed(2)),
+    position: vecToPlain(entity?.position),
+    yaw: typeof entity?.yaw === 'number' ? Number(entity.yaw.toFixed(3)) : null,
+    pitch: typeof entity?.pitch === 'number' ? Number(entity.pitch.toFixed(3)) : null,
+    height: typeof entity?.height === 'number' ? Number(entity.height.toFixed(2)) : null,
+    width: typeof entity?.width === 'number' ? Number(entity.width.toFixed(2)) : null
+  };
+}
+
+function debugEntitiesPayload(options = {}) {
+  const maxDistance = Math.max(1, Math.min(256, asNumber(options.maxDistance, 96)));
+  const limit = Math.max(1, Math.min(200, asNumber(options.limit, 120)));
+  const entities = Object.values(bot?.entities || {})
+    .filter((entity) => entity && entity !== bot?.entity && entity.position)
+    .map(debugEntitySummary)
+    .filter((entity) => entity.distance === null || entity.distance <= maxDistance)
+    .sort((a, b) => (a.distance ?? 9999) - (b.distance ?? 9999))
+    .slice(0, limit);
+  const players = Object.entries(bot?.players || {})
+    .filter(([name]) => name !== bot?.username)
+    .map(([name, player]) => ({
+      name,
+      uuid: player.uuid || null,
+      ping: player.ping ?? null,
+      gamemode: player.gamemode ?? null,
+      entity: player.entity ? debugEntitySummary(player.entity) : null,
+      visible: Boolean(player.entity)
+    }));
+
+  return {
+    type: 'debug_entities',
+    timestamp: now(),
+    bot: {
+      username: bot?.username || config.minecraft.username,
+      position: vecToPlain(bot?.entity?.position),
+      entityId: bot?.entity?.id ?? null
+    },
+    owner: config.behavior.owner || '',
+    maxDistance,
+    players,
+    entities
+  };
+}
+
 function dangerState() {
   const hostiles = nearbyEntities().filter((entity) => HOSTILE_NAMES.has(String(entity.name || '').toLowerCase()));
   const nearest = hostiles[0] || null;
@@ -561,6 +619,11 @@ function startBridge() {
 
       if (frame.type === 'query_inventory') {
         publishInventory();
+        return;
+      }
+
+      if (frame.type === 'debug_entities') {
+        send(socket, debugEntitiesPayload({ maxDistance: frame.maxDistance, limit: frame.limit }));
         return;
       }
 
