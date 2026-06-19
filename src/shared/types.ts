@@ -171,6 +171,43 @@ export type MinecraftAgentStarterConfigPatch = Partial<
   >
 >;
 
+export type MinecraftAgentStarterProcessAction = 'install' | 'start' | 'stop';
+export type MinecraftAgentStarterProcessLogLevel = 'info' | 'warn' | 'error';
+export type MinecraftAgentStarterProcessLogSource = 'system' | 'stdout' | 'stderr';
+
+export interface MinecraftAgentStarterProcessLog {
+  id: string;
+  createdAt: number;
+  level: MinecraftAgentStarterProcessLogLevel;
+  source: MinecraftAgentStarterProcessLogSource;
+  text: string;
+}
+
+export interface MinecraftAgentStarterProcessState {
+  running: boolean;
+  installing: boolean;
+  pid: number | null;
+  command: string | null;
+  cwd: string | null;
+  startedAt: number;
+  exitedAt: number;
+  exitCode: number | null;
+  signal: string | null;
+  lastError: string | null;
+  logs: MinecraftAgentStarterProcessLog[];
+}
+
+export type MinecraftAgentStarterProcessEvent =
+  | {
+      type: 'processLog';
+      log: MinecraftAgentStarterProcessLog;
+      state: MinecraftAgentStarterProcessState;
+    }
+  | {
+      type: 'processState';
+      state: MinecraftAgentStarterProcessState;
+    };
+
 export interface MinecraftAgentStarterInfo {
   available: boolean;
   rootDir: string;
@@ -185,8 +222,18 @@ export interface MinecraftAgentStarterInfo {
   npmVersion?: string;
   currentConfig?: MinecraftAgentStarterConfig;
   diagnostics: MinecraftAgentStarterDiagnostic[];
+  processState: MinecraftAgentStarterProcessState;
   installCommand: string;
   startCommand: string;
+  error?: string;
+}
+
+export interface MinecraftAgentStarterProcessActionResult {
+  ok: boolean;
+  action: MinecraftAgentStarterProcessAction;
+  message: string;
+  info: MinecraftAgentStarterInfo;
+  state: MinecraftAgentStarterProcessState;
   error?: string;
 }
 

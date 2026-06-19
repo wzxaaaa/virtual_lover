@@ -2161,6 +2161,77 @@ body.neko-model-dragging .pet-floating-toolbar * {
   background: rgba(211, 57, 50, 0.11);
 }
 
+.minecraft-agent-process {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  padding: 9px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(38, 44, 54, 0.09);
+}
+
+.minecraft-agent-process .minecraft-agent-status-row > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  color: #687386;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.minecraft-agent-log-panel {
+  min-width: 0;
+  max-height: 154px;
+  overflow: auto;
+  display: grid;
+  align-content: start;
+  gap: 5px;
+  padding: 8px;
+  border-radius: 8px;
+  color: #53606f;
+  background: rgba(246, 249, 249, 0.74);
+  border: 1px solid rgba(38, 44, 54, 0.08);
+}
+
+.minecraft-agent-log-panel > div {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #303946;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.minecraft-agent-log-panel p {
+  min-width: 0;
+  margin: 0;
+  color: #53606f;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 1.38;
+  word-break: break-word;
+}
+
+.minecraft-agent-log-panel p span {
+  margin-right: 6px;
+  color: #85909d;
+}
+
+.minecraft-agent-log-panel p.is-warn {
+  color: #755320;
+}
+
+.minecraft-agent-log-panel p.is-error {
+  color: #9b3430;
+}
+
+.minecraft-agent-log-panel p.is-muted {
+  color: #8a94a1;
+  font-family: inherit;
+}
+
 .minecraft-agent-status {
   min-width: 0;
   display: grid;

@@ -19,6 +19,10 @@ import {
   MinecraftAgentInventoryResponse,
   MinecraftAgentStarterConfigPatch,
   MinecraftAgentStarterInfo,
+  MinecraftAgentStarterProcessAction,
+  MinecraftAgentStarterProcessActionResult,
+  MinecraftAgentStarterProcessEvent,
+  MinecraftAgentStarterProcessState,
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
   MinecraftAgentTaskResult,
@@ -42,6 +46,7 @@ const streamListeners = new Map<string, { channel: string; listener: (event: Ipc
 const heartbeatListeners = new Set<(event: VirtualHeartbeatEvent) => void>();
 const agentTaskEventListeners = new Set<(event: AgentTaskEvent) => void>();
 const minecraftAgentEventListeners = new Set<(event: MinecraftAgentEvent) => void>();
+const minecraftAgentStarterEventListeners = new Set<(event: MinecraftAgentStarterProcessEvent) => void>();
 
 function disposeAgentTurnStream(requestId: string): void {
   const entry = streamListeners.get(requestId);
@@ -103,6 +108,14 @@ const api = {
   getMinecraftAgentStarterInfo: (): Promise<MinecraftAgentStarterInfo> => ipcRenderer.invoke('minecraft:agentStarterInfo'),
   saveMinecraftAgentStarterConfig: (patch: MinecraftAgentStarterConfigPatch): Promise<MinecraftAgentStarterInfo> =>
     ipcRenderer.invoke('minecraft:agentStarterConfig:save', patch),
+  getMinecraftAgentStarterProcessState: (): Promise<MinecraftAgentStarterProcessState> =>
+    ipcRenderer.invoke('minecraft:agentStarterProcess:state'),
+  runMinecraftAgentStarterProcessAction: (action: MinecraftAgentStarterProcessAction): Promise<MinecraftAgentStarterProcessActionResult> =>
+    ipcRenderer.invoke('minecraft:agentStarterProcess:run', action),
+  onMinecraftAgentStarterEvent: (listener: (event: MinecraftAgentStarterProcessEvent) => void): (() => void) => {
+    minecraftAgentStarterEventListeners.add(listener);
+    return () => minecraftAgentStarterEventListeners.delete(listener);
+  },
   getMinecraftAgentStatus: (): Promise<MinecraftAgentStatus> => ipcRenderer.invoke('minecraft:agentStatus'),
   sendMinecraftAgentTask: (request: MinecraftAgentTaskRequest): Promise<MinecraftAgentTaskResult> => ipcRenderer.invoke('minecraft:agentTask', request),
   queryMinecraftAgentInventory: (timeoutMs = 2000): Promise<MinecraftAgentInventoryResponse> => ipcRenderer.invoke('minecraft:agentInventory', timeoutMs),
@@ -134,6 +147,10 @@ ipcRenderer.on('agent:tasks:event', (_event, payload: AgentTaskEvent) => {
 
 ipcRenderer.on('minecraft:agentEvent', (_event, payload: MinecraftAgentEvent) => {
   minecraftAgentEventListeners.forEach((listener) => listener(payload));
+});
+
+ipcRenderer.on('minecraft:agentStarterEvent', (_event, payload: MinecraftAgentStarterProcessEvent) => {
+  minecraftAgentStarterEventListeners.forEach((listener) => listener(payload));
 });
 
 contextBridge.exposeInMainWorld('lover', api);

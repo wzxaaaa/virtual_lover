@@ -18,6 +18,12 @@ import {
 } from './live2dModels';
 import { clearMemory, loadMemory, runSleepConsolidation, runVirtualHeartbeat, updateMemoryFromTurn } from './memory';
 import { getMinecraftAgentStatus, onMinecraftAgentEvent, queryMinecraftAgentInventory, sendMinecraftAgentTask, stopMinecraftAgent } from './minecraftAgent';
+import {
+  getMinecraftAgentStarterProcessState,
+  onMinecraftAgentStarterProcessEvent,
+  runMinecraftAgentStarterProcessAction,
+  stopMinecraftAgentStarterProcess
+} from './minecraftAgentStarterProcess';
 import { testProviderConnectivity } from './providerConnectivity';
 import { capturePrimaryScreen } from './screen';
 import { synthesizeSpeech } from './tts';
@@ -32,6 +38,8 @@ import {
   MinecraftAgentStarterConfigPatch,
   MinecraftAgentStarterDiagnostic,
   MinecraftAgentStarterInfo,
+  MinecraftAgentStarterProcessAction,
+  MinecraftAgentStarterProcessActionResult,
   MinecraftAgentTaskRequest,
   OpenPathResult,
   PetCursorPosition,
@@ -359,6 +367,7 @@ async function minecraftAgentStarterInfo(): Promise<MinecraftAgentStarterInfo> {
     npmVersion,
     currentConfig: starterConfig.config,
     diagnostics,
+    processState: getMinecraftAgentStarterProcessState(),
     installCommand: `cd /d "${rootDir}" && npm install`,
     startCommand: `cd /d "${rootDir}" && npm start`,
     error: available ? undefined : 'Bundled Minecraft Agent starter is missing.'
@@ -400,6 +409,15 @@ async function saveMinecraftAgentStarterConfig(patch: MinecraftAgentStarterConfi
   }
 
   return minecraftAgentStarterInfo();
+}
+
+async function runMinecraftAgentStarterAction(action: MinecraftAgentStarterProcessAction): Promise<MinecraftAgentStarterProcessActionResult> {
+  const info = await minecraftAgentStarterInfo();
+  const result = await runMinecraftAgentStarterProcessAction(action, info.rootDir);
+  return {
+    ...result,
+    info: await minecraftAgentStarterInfo()
+  };
 }
 
 function clampWindowValue(value: number, min: number, max: number): number {
@@ -718,6 +736,11 @@ app.whenReady().then(async () => {
       mainWindow.webContents.send('minecraft:agentEvent', event);
     }
   });
+  onMinecraftAgentStarterProcessEvent((event) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('minecraft:agentStarterEvent', event);
+    }
+  });
   startVirtualHeartbeat();
 
   app.on('activate', () => {
@@ -730,6 +753,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   stopVirtualHeartbeat();
   stopMinecraftAgent();
+  void stopMinecraftAgentStarterProcess();
   if (process.platform !== 'darwin') {
     app.quit();
   }
@@ -890,6 +914,12 @@ ipcMain.handle('minecraft:agentStarterInfo', async () => minecraftAgentStarterIn
 
 ipcMain.handle('minecraft:agentStarterConfig:save', async (_event, patch: MinecraftAgentStarterConfigPatch = {}) =>
   saveMinecraftAgentStarterConfig(patch)
+);
+
+ipcMain.handle('minecraft:agentStarterProcess:state', async () => getMinecraftAgentStarterProcessState());
+
+ipcMain.handle('minecraft:agentStarterProcess:run', async (_event, action: MinecraftAgentStarterProcessAction) =>
+  runMinecraftAgentStarterAction(action)
 );
 
 ipcMain.handle('minecraft:agentStatus', async () => {

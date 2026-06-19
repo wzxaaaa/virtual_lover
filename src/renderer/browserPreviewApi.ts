@@ -18,6 +18,10 @@ import {
   type MinecraftAgentInventoryResponse,
   type MinecraftAgentStarterConfigPatch,
   type MinecraftAgentStarterInfo,
+  type MinecraftAgentStarterProcessAction,
+  type MinecraftAgentStarterProcessActionResult,
+  type MinecraftAgentStarterProcessEvent,
+  type MinecraftAgentStarterProcessState,
   type MinecraftAgentStatus,
   type MinecraftAgentTaskRequest,
   type MinecraftAgentTaskResult,
@@ -150,6 +154,22 @@ function previewMinecraftAgentStatus(): MinecraftAgentStatus {
   };
 }
 
+function previewMinecraftStarterProcessState(): MinecraftAgentStarterProcessState {
+  return {
+    running: false,
+    installing: false,
+    pid: null,
+    command: null,
+    cwd: null,
+    startedAt: 0,
+    exitedAt: 0,
+    exitCode: null,
+    signal: null,
+    lastError: 'Browser preview cannot manage local Minecraft Agent processes.',
+    logs: []
+  };
+}
+
 function configAgentWsUrl(): string {
   return DEFAULT_CONFIG.agent.minecraftAgentWsUrl;
 }
@@ -271,6 +291,7 @@ export function installBrowserPreviewApi(): void {
       startScriptExists: false,
       nodeModulesInstalled: false,
       diagnostics: [{ level: 'warn', message: 'Browser preview cannot access local filesystem.' }],
+      processState: previewMinecraftStarterProcessState(),
       installCommand: 'cd integrations/minecraft-agent && npm install',
       startCommand: 'cd integrations/minecraft-agent && npm start',
       error: 'Browser preview cannot access local filesystem.'
@@ -286,10 +307,36 @@ export function installBrowserPreviewApi(): void {
       startScriptExists: false,
       nodeModulesInstalled: false,
       diagnostics: [{ level: 'warn', message: 'Browser preview cannot save Minecraft Agent config.' }],
+      processState: previewMinecraftStarterProcessState(),
       installCommand: 'cd integrations/minecraft-agent && npm install',
       startCommand: 'cd integrations/minecraft-agent && npm start',
       error: 'Browser preview cannot access local filesystem.'
     }),
+    getMinecraftAgentStarterProcessState: async (): Promise<MinecraftAgentStarterProcessState> => previewMinecraftStarterProcessState(),
+    runMinecraftAgentStarterProcessAction: async (action: MinecraftAgentStarterProcessAction): Promise<MinecraftAgentStarterProcessActionResult> => ({
+      ok: false,
+      action,
+      message: 'Browser preview cannot manage local Minecraft Agent processes.',
+      info: {
+        available: false,
+        rootDir: 'integrations/minecraft-agent',
+        startScript: 'integrations/minecraft-agent/start-windows.cmd',
+        packageJson: 'integrations/minecraft-agent/package.json',
+        readmePath: 'integrations/minecraft-agent/README.md',
+        configPath: 'integrations/minecraft-agent/config.json',
+        configExists: false,
+        startScriptExists: false,
+        nodeModulesInstalled: false,
+        diagnostics: [{ level: 'warn', message: 'Browser preview cannot manage Minecraft Agent processes.' }],
+        processState: previewMinecraftStarterProcessState(),
+        installCommand: 'cd integrations/minecraft-agent && npm install',
+        startCommand: 'cd integrations/minecraft-agent && npm start',
+        error: 'Browser preview cannot access local filesystem.'
+      },
+      state: previewMinecraftStarterProcessState(),
+      error: 'Browser preview cannot manage local Minecraft Agent processes.'
+    }),
+    onMinecraftAgentStarterEvent: (_listener: (event: MinecraftAgentStarterProcessEvent) => void) => () => undefined,
     getMinecraftAgentStatus: async (): Promise<MinecraftAgentStatus> => ({
       ...previewMinecraftAgentStatus(),
       wsUrl: config.agent.minecraftAgentWsUrl

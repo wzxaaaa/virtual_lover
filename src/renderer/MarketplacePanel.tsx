@@ -7,7 +7,9 @@ import {
   PlugZap,
   RefreshCw,
   Settings2,
-  Sparkles
+  Sparkles,
+  Square,
+  Terminal
 } from 'lucide-react';
 import type { ReactElement } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -21,6 +23,8 @@ import type {
   AppConfig,
   MinecraftAgentStarterConfigPatch,
   MinecraftAgentStarterInfo,
+  MinecraftAgentStarterProcessAction,
+  MinecraftAgentStarterProcessState,
   MinecraftAgentStatus
 } from '../shared/types';
 import { openExternalUrl } from './openExternal';
@@ -71,6 +75,20 @@ const DEFAULT_STARTER_CONFIG_FORM: MinecraftAgentStarterConfigForm = {
   regroupDistance: 8
 };
 
+const DEFAULT_STARTER_PROCESS_STATE: MinecraftAgentStarterProcessState = {
+  running: false,
+  installing: false,
+  pid: null,
+  command: null,
+  cwd: null,
+  startedAt: 0,
+  exitedAt: 0,
+  exitCode: null,
+  signal: null,
+  lastError: null,
+  logs: []
+};
+
 const MC_AGENT_DOWNLOAD_LINKS = [
   { id: 'quark', label: '夸克网盘', url: 'https://pan.quark.cn/s/b662424f7f34' },
   {
@@ -101,6 +119,7 @@ function starterInfoFallback(error: unknown): MinecraftAgentStarterInfo {
     configExists: false,
     startScriptExists: false,
     nodeModulesInstalled: false,
+    processState: DEFAULT_STARTER_PROCESS_STATE,
     diagnostics: [
       {
         level: 'error',
@@ -191,12 +210,14 @@ function MinecraftAgentMarketplaceConfig({
   const [agentStatus, setAgentStatus] = useState<MinecraftAgentStatus | null>(null);
   const [starterInfo, setStarterInfo] = useState<MinecraftAgentStarterInfo | null>(null);
   const [starterConfigForm, setStarterConfigForm] = useState<MinecraftAgentStarterConfigForm>(DEFAULT_STARTER_CONFIG_FORM);
+  const [starterProcessState, setStarterProcessState] = useState<MinecraftAgentStarterProcessState>(DEFAULT_STARTER_PROCESS_STATE);
   const [statusLoading, setStatusLoading] = useState(false);
   const [launchMessage, setLaunchMessage] = useState('');
 
   const applyStarterInfo = useCallback((info: MinecraftAgentStarterInfo): void => {
     setStarterInfo(info);
     setStarterConfigForm(starterFormFromInfo(info));
+    setStarterProcessState(info.processState);
   }, []);
 
   const refreshStarterInfo = useCallback(async (): Promise<void> => {
@@ -255,6 +276,39 @@ function MinecraftAgentMarketplaceConfig({
   useEffect(() => {
     let active = true;
 
+    if (typeof window.lover.getMinecraftAgentStarterProcessState === 'function') {
+      window.lover
+        .getMinecraftAgentStarterProcessState()
+        .then((state) => {
+          if (active) {
+            setStarterProcessState(state);
+          }
+        })
+        .catch(() => undefined);
+    }
+
+    if (typeof window.lover.onMinecraftAgentStarterEvent !== 'function') {
+      return () => {
+        active = false;
+      };
+    }
+
+    const dispose = window.lover.onMinecraftAgentStarterEvent((event) => {
+      if (!active) {
+        return;
+      }
+      setStarterProcessState(event.state);
+    });
+
+    return () => {
+      active = false;
+      dispose();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
     const refresh = async (): Promise<void> => {
       setStatusLoading(true);
       try {
@@ -296,6 +350,14 @@ function MinecraftAgentMarketplaceConfig({
       ? `${agentStatus.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'} ${new Date(agentStatus.lastNudgeAt).toLocaleTimeString('zh-CN')}`
       : '暂无';
   const adminUrl = config.agent.minecraftAgentAdminUrl || MC_AGENT_ADMIN_DEFAULT_URL;
+  const starterProcessTone = starterProcessState.installing ? 'checking' : starterProcessState.running ? 'connected' : 'disconnected';
+  const starterProcessLabel = starterProcessState.installing
+    ? '正在安装依赖'
+    : starterProcessState.running
+      ? `内置 starter 运行中${starterProcessState.pid ? ` #${starterProcessState.pid}` : ''}`
+      : '内置 starter 未运行';
+  const starterProcessLogs = starterProcessState.logs.slice(-8).reverse();
+  const starterProcessBusy = starterProcessState.running || starterProcessState.installing;
 
   const updateStarterConfigForm = (patch: Partial<MinecraftAgentStarterConfigForm>): void => {
     setStarterConfigForm((current) => ({ ...current, ...patch }));
@@ -324,6 +386,27 @@ function MinecraftAgentMarketplaceConfig({
 
   const openAdminPanel = (): void => {
     openExternalUrl(adminUrl);
+  };
+
+  const runStarterProcessAction = async (action: MinecraftAgentStarterProcessAction): Promise<void> => {
+    if (typeof window.lover.runMinecraftAgentStarterProcessAction !== 'function') {
+      setLaunchMessage('当前窗口还没有加载 Minecraft Agent 进程管理接口，请重启应用后再试。');
+      return;
+    }
+
+    try {
+      const result = await window.lover.runMinecraftAgentStarterProcessAction(action);
+      applyStarterInfo(result.info);
+      setStarterProcessState(result.state);
+      setLaunchMessage(result.message);
+      if (action !== 'install') {
+        window.setTimeout(() => {
+          void refreshStatus();
+        }, 1200);
+      }
+    } catch (error) {
+      setLaunchMessage(error instanceof Error ? error.message : 'Minecraft Agent 进程操作失败。');
+    }
   };
 
   const openStarterDirectory = async (): Promise<void> => {
@@ -393,6 +476,58 @@ function MinecraftAgentMarketplaceConfig({
           ))}
         </ul>
       ) : null}
+
+      <div className="minecraft-agent-process">
+        <div className="minecraft-agent-status-row">
+          <span className={`minecraft-agent-status-badge is-${starterProcessTone}`}>{starterProcessLabel}</span>
+          <span>{starterProcessState.command || 'npm start'}</span>
+        </div>
+        <div className="minecraft-agent-actions">
+          <button
+            className="minecraft-agent-button"
+            type="button"
+            disabled={starterProcessState.installing || starterProcessState.running}
+            onClick={() => void runStarterProcessAction('install')}
+          >
+            <Download size={15} />
+            安装依赖
+          </button>
+          <button
+            className="minecraft-agent-button"
+            type="button"
+            disabled={starterProcessBusy}
+            onClick={() => void runStarterProcessAction('start')}
+          >
+            <Play size={15} />
+            启动内置 starter
+          </button>
+          <button
+            className="minecraft-agent-button"
+            type="button"
+            disabled={!starterProcessBusy}
+            onClick={() => void runStarterProcessAction('stop')}
+          >
+            <Square size={15} />
+            停止
+          </button>
+        </div>
+        <div className="minecraft-agent-log-panel">
+          <div>
+            <Terminal size={14} />
+            <span>启动日志</span>
+          </div>
+          {starterProcessLogs.length ? (
+            starterProcessLogs.map((log) => (
+              <p key={log.id} className={`is-${log.level}`}>
+                <span>{new Date(log.createdAt).toLocaleTimeString('zh-CN')}</span>
+                {log.text}
+              </p>
+            ))
+          ) : (
+            <p className="is-muted">暂无日志</p>
+          )}
+        </div>
+      </div>
 
       <div className="minecraft-agent-status" aria-live="polite">
         <div className="minecraft-agent-status-row">

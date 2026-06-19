@@ -17,7 +17,7 @@ npm start
 
 The bridge listens on `ws://127.0.0.1:48909` by default. Keep the terminal open while playing.
 
-You can also open **Market -> MCP -> Minecraft Agent -> Configure** in Virtual Lover. The panel can generate `config.json`, save the LAN port / bot username / auth mode, show Node/npm/dependency diagnostics, and keep the app WebSocket URL in sync with the starter bridge.
+You can also open **Market -> MCP -> Minecraft Agent -> Configure** in Virtual Lover. The panel can generate `config.json`, save the LAN port / bot username / auth mode, show Node/npm/dependency diagnostics, keep the app WebSocket URL in sync with the starter bridge, install dependencies, start/stop the bundled starter, and display recent startup logs.
 
 ## Accounts
 
