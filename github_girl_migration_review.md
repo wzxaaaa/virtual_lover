@@ -205,8 +205,9 @@
 - `P17` 已补第二十段目标阶段/检查点状态：继续按 `github_girl` `GameAgentService` 把 pending、dispatched history、task_finished、keep-going nudge 分开的思路，本项目新增 `MinecraftAgentPlanState`，在任务帧真正发出后记录 active step，收到完成/受阻/超时/打断/迟到完成后回写最近步骤、摘要、连续失败次数和最后结果时间。`planState` 进入 `MinecraftAgentStatus`、LLM 的 Minecraft bot 视角、状态工具、前端状态回复和 keep-going nudge；当连续受阻时，prompt 会要求换具体坐标/目标或先问用户，不再重复派同一个动作。适配点：这还不是外部 mc-agent 里的真正规划器，而是当前应用内的目标阶段缓存；完整 plan/checkpoint/失败恢复仍需要后续结合 message-plane 和外部身体状态实现。
 - `P17` 已补第二十一段协议回放测试扩展：继续按 `github_girl` `smoke_local.py` / `smoke_overwrite.py` 的思路，把本项目 `scripts/smoke-minecraft-agent.mjs` 从普通 task/query_inventory/stale-task-id 扩到 `rich-state`、`blocked-task`、`chat` 三个 mock 场景。`rich-state` 会回放血量、坐标、维度、生物群系、装备、附近实体、队友位置、路径、危险、聊天和告警；`blocked-task` 会模拟 `status=ok` 但文本含 `could not/no path` 的 blocked marker；`chat` 会验证出站聊天帧和入站聊天回显。新增 `npm run smoke:minecraft-agent:mock:rich|blocked|chat`，用于后续改 Agent 架构时快速锁住协议行为。适配点：这仍是 Node WebSocket 协议级 smoke，不是 Electron 主进程内部服务测试；服务级测试还要等测试入口或 message-plane 拆出来后补。
 - `P17` 已补第二十二段多人协作语义：在不破坏 `github_girl` 已迁的 `minecraft_task`/busy/overwrite/nudge 规则前提下，新增“跟随 3-5 格、不挡视线/路径、距离超过 8 格先等待或找回、危险优先保护、分工不抢资源、共享箱子只处理富余物品”等协作约束。文本直达现在能识别“别挡路/保护我/等我/带路/分工/共享箱子”等指令并转成更具体的英文 task；LLM Minecraft 视角、游戏同伴 prompt、状态工具回复和市场能力都同步显示协作状态。主进程状态解析新增 `sharedContainers` 和 `blockInteraction` 兼容字段，rich-state smoke 也回放并断言共享容器/方块交互进度。适配点：`github_girl` 公开 Minecraft 插件本身没有更细的协作 schema，本轮属于在其 game-agent 桥接逻辑之上的本项目适配增强；真正“不挡路/共享箱子/分工”的物理执行还依赖外部 mc-agent 按 task 落地。
+- `P17` 已补第二十三段 Electron 主进程服务级 smoke：新增 `scripts/smoke-minecraft-agent-service.mjs` 和 `npm run smoke:minecraft-agent:service`，脚本会临时 bundle 真实 `MinecraftAgentService`，给 Node 环境注入最小 WebSocket client，再启动 mock mc-agent 验证主进程服务语义：`queryInventory` live 回包、`dispatchTask` pending 状态事件、busy 拦截、2 秒 overwrite 防抖、超过保护窗后的打断/替换、匹配 `task_finished` 清 pending、游戏内聊天事件、断线时中断 pending 并回流 disconnected 状态。该 smoke 抓出并修复了一个真实 race：原 `queryInventory` 先发送 `query_inventory` 再登记 waiter，外部 agent 快速回包时会丢响应；现在改为先登记 waiter 再发送，发送失败再移除 waiter。适配点：这不是完整 Electron 窗口 E2E，但已经覆盖主进程服务内核和 renderer 依赖的 `minecraft:agentEvent` 事件源。
 
-当前进度估算：整体迁移约 66%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 86%。
+当前进度估算：整体迁移约 67%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 87%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -230,12 +231,12 @@
 5. **多玩家协作语义**：已补跟随半径、别挡路、保护、带路、等待、分工采集、共享箱子等任务/prompt/status 规则；还缺外部 mc-agent 真实物理层的“不挡路”寻路策略、共享容器锁/物品预定、稳定用户身份映射和基于用户视线方向的协作细节。
 6. **游戏内自然沟通**：已补基础聊天桥，能缓存游戏聊天并通过 `plugin.minecraft_chat` 向外部 mc-agent 发送短句；还缺外部 mc-agent 对聊天帧的稳定协议确认、游戏内用户身份映射，以及把游戏内聊天和桌面对话做更完整的去重/合并。
 7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。
-8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；还缺 Electron 主进程服务级 smoke，自动覆盖断线、busy、overwrite 防抖、UI 事件回流。
+8. **E2E 测试环境**：已有 Node 版 mc-agent 协议 smoke 和 mock/stale-task-id/rich-state/blocked-task/chat 场景，能验证 task/query_inventory/screenshot/task_finished/迟到包、richer status、blocked marker、chat/alert 回放；也已有主进程服务级 smoke 覆盖 live inventory、busy、overwrite 防抖、匹配完成、聊天、断线和事件回流。还缺真正启动 Electron renderer 的端到端 UI smoke，以及接真实 Minecraft/mineflayer 的联机回放。
 
 ### 下一步建议顺序
 
-1. 先补 **Electron 主进程服务级 Minecraft smoke**，覆盖断线、busy、overwrite 防抖、UI 事件回流，把目前 99% 的项目内闭环锁住。
-2. 再补 **mc-agent 协作协议确认**，和外部 agent 对齐 tracked player 身份、共享容器、方块交互、不挡路/跟随半径这些字段与动作语义。
+1. 先补 **mc-agent 协作协议确认**，和外部 agent 对齐 tracked player 身份、共享容器、方块交互、不挡路/跟随半径这些字段与动作语义。
+2. 再补 **真实 Electron renderer UI smoke**，从 IPC/preload 到聊天 UI 验证 Minecraft 状态、任务和事件能完整显示。
 3. 然后做 **全局 message-plane**，让 Minecraft 和其他 Agent 能共享 `read/respond`、priority、coalesce。
 4. 最后再拆 **独立 Agent 服务 + 任务系统**，这是大工程，应该在 Minecraft 核心稳定后动。
 

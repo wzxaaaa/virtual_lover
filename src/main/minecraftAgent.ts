@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { nativeImage } from 'electron';
+import electron from 'electron';
 import type {
   AppConfig,
   MinecraftAgentBlockInteractionState,
@@ -55,6 +55,8 @@ const IN_PROGRESS_NUDGE_COOLDOWN_MS = 8000;
 const KEEP_GOING_NUDGE_AFTER_MS = 8000;
 const KEEP_GOING_NUDGE_COOLDOWN_MS = 10000;
 const OVERWRITE_MIN_SURVIVAL_MS = 2000;
+const electronRuntime = electron as Partial<typeof import('electron')> | string;
+const nativeImage = typeof electronRuntime === 'object' && electronRuntime ? electronRuntime.nativeImage : undefined;
 const BLOCKED_TASK_FEEDBACK_MARKERS = [
   'obstacle',
   'obstructed',
@@ -802,6 +804,13 @@ function mimeTypeFromDataUrl(dataUrl: string, fallback: string): string {
 }
 
 function compressScreenshotDataUrl(dataUrl: string, sourceMimeType: string): Omit<MinecraftAgentScreenshot, 'capturedAt'> {
+  if (!nativeImage) {
+    return {
+      dataUrl,
+      mimeType: mimeTypeFromDataUrl(dataUrl, sourceMimeType)
+    };
+  }
+
   try {
     const image = nativeImage.createFromDataURL(dataUrl);
     if (image.isEmpty()) {
@@ -987,7 +996,7 @@ function formatChatLine(message: MinecraftAgentChatMessage): string {
   return `${speaker}: ${message.text}`;
 }
 
-class MinecraftAgentService {
+export class MinecraftAgentService {
   private wsUrl = DEFAULT_WS_URL;
   private running = false;
   private connected = false;
@@ -1245,19 +1254,23 @@ class MinecraftAgentService {
     this.start(config);
 
     if (await this.waitForConnection(Math.min(CONNECT_WAIT_MS, timeoutMs))) {
-      const sent = this.sendJson({ type: 'query_inventory' });
-      if (sent) {
-        return new Promise((resolve) => {
-          const waiter: InventoryWaiter = {
-            timeout: setTimeout(() => {
-              this.inventoryWaiters = this.inventoryWaiters.filter((item) => item !== waiter);
-              resolve(this.cachedInventoryResponse(this.lastInventoryAt > 0 ? 'cached' : 'none', 'Minecraft 背包查询超时。'));
-            }, timeoutMs),
-            resolve
-          };
-          this.inventoryWaiters.push(waiter);
-        });
-      }
+      return new Promise((resolve) => {
+        const waiter: InventoryWaiter = {
+          timeout: setTimeout(() => {
+            this.inventoryWaiters = this.inventoryWaiters.filter((item) => item !== waiter);
+            resolve(this.cachedInventoryResponse(this.lastInventoryAt > 0 ? 'cached' : 'none', 'Minecraft 背包查询超时。'));
+          }, timeoutMs),
+          resolve
+        };
+        this.inventoryWaiters.push(waiter);
+
+        const sent = this.sendJson({ type: 'query_inventory' });
+        if (!sent) {
+          clearTimeout(waiter.timeout);
+          this.inventoryWaiters = this.inventoryWaiters.filter((item) => item !== waiter);
+          resolve(this.cachedInventoryResponse(this.lastInventoryAt > 0 ? 'cached' : 'none', this.lastError ?? 'Minecraft Agent 未连接。'));
+        }
+      });
     }
 
     return this.cachedInventoryResponse(this.lastInventoryAt > 0 ? 'cached' : 'none', this.lastError ?? 'Minecraft Agent 未连接。');

@@ -4,6 +4,7 @@ out
 release
 logs
 .vite
+.tmp
 .DS_Store
 .env
 .env.*
