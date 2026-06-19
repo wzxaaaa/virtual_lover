@@ -27,6 +27,14 @@ npm run smoke:minecraft-agent:status
 
 The smoke output includes `world_join`, live inventory, and the last known position/dimension when the agent reports them.
 
+After the status check says the bot is in the world, run one low-risk action replay:
+
+```bash
+npm run smoke:minecraft-agent:safe
+```
+
+This sends `stop and wait safely`, waits for `task_finished`, then prints the latest inventory/status summary. In the app, the same flow is **Market -> MCP -> Minecraft Agent -> Configure -> Safe replay**.
+
 ## Accounts
 
 For LAN/offline testing, `auth: "offline"` and `username: "VirtualLoverBot"` are enough when your server accepts offline players.

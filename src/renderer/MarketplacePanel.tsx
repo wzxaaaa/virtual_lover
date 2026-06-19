@@ -334,6 +334,7 @@ function MinecraftAgentMarketplaceConfig({
   const [lanPortText, setLanPortText] = useState('');
   const [statusLoading, setStatusLoading] = useState(false);
   const [joinVerifyLoading, setJoinVerifyLoading] = useState(false);
+  const [safeReplayLoading, setSafeReplayLoading] = useState(false);
   const [launchMessage, setLaunchMessage] = useState('');
 
   const applyStarterInfo = useCallback((info: MinecraftAgentStarterInfo): void => {
@@ -554,6 +555,47 @@ function MinecraftAgentMarketplaceConfig({
     }
   };
 
+  const runMinecraftSafeReplay = async (): Promise<void> => {
+    if (typeof window.lover.sendMinecraftAgentTask !== 'function') {
+      setLaunchMessage('当前窗口还没有加载 Minecraft Agent 任务接口，请重启应用后再试。');
+      return;
+    }
+
+    setSafeReplayLoading(true);
+    setStatusLoading(true);
+    try {
+      const beforeStatus = await window.lover.getMinecraftAgentStatus();
+      setAgentStatus(beforeStatus);
+
+      if (beforeStatus.joinState.phase !== 'joined') {
+        const detail = minecraftJoinDetail(beforeStatus.joinState, beforeStatus, starterConfigForm);
+        setLaunchMessage(`安全回放未开始：${detail}。${minecraftJoinAdvice(beforeStatus.joinState, beforeStatus)}`);
+        return;
+      }
+
+      const timeoutMs = Math.min(Math.max(config.agent.minecraftAgentTaskTimeoutMs || 30000, 1000), 30000);
+      const taskResult = await window.lover.sendMinecraftAgentTask({
+        goal: 'minecraft safe replay',
+        overwrite: true,
+        task: 'stop and wait safely',
+        timeoutMs
+      });
+      const inventoryResponse = await window.lover.queryMinecraftAgentInventory(2000).catch(() => null);
+      const latestStatus = await window.lover.getMinecraftAgentStatus().catch(() => beforeStatus);
+      setAgentStatus(latestStatus);
+
+      const resultLine = taskResult.summary || taskResult.text || taskResult.error || taskResult.status;
+      const inventoryLine = `Live 背包：${minecraftInventoryBrief(inventoryResponse)}。`;
+      const prefix = taskResult.ok ? '安全回放通过' : '安全回放未通过';
+      setLaunchMessage(`${prefix}：${resultLine}。${inventoryLine}${minecraftJoinAdvice(latestStatus.joinState, latestStatus)}`);
+    } catch (error) {
+      setLaunchMessage(error instanceof Error ? error.message : 'Minecraft 安全回放失败。');
+    } finally {
+      setSafeReplayLoading(false);
+      setStatusLoading(false);
+    }
+  };
+
   const openAdminPanel = (): void => {
     openExternalUrl(adminUrl);
   };
@@ -724,6 +766,15 @@ function MinecraftAgentMarketplaceConfig({
             <button className="minecraft-agent-button" type="button" disabled={joinVerifyLoading || statusLoading} onClick={() => void verifyMinecraftJoin()}>
               <CheckCircle2 size={15} />
               验证联机
+            </button>
+            <button
+              className="minecraft-agent-button"
+              type="button"
+              disabled={safeReplayLoading || joinVerifyLoading || statusLoading}
+              onClick={() => void runMinecraftSafeReplay()}
+            >
+              <Play size={15} />
+              安全回放
             </button>
           </div>
         </div>
