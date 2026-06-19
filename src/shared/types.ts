@@ -304,6 +304,31 @@ export interface MinecraftAgentAlert {
   receivedAt: number;
 }
 
+export interface MinecraftAgentPosition {
+  x: number;
+  y: number;
+  z: number;
+  yaw?: number;
+  pitch?: number;
+}
+
+export interface MinecraftAgentWorldState {
+  updatedAt: number;
+  health?: number;
+  maxHealth?: number;
+  food?: number;
+  saturation?: number;
+  level?: number;
+  xp?: number;
+  dimension?: string;
+  biome?: string;
+  gameMode?: string;
+  position?: MinecraftAgentPosition;
+  selectedItem?: string;
+  equipment?: Record<string, string>;
+  nearbyEntities?: string[];
+}
+
 export interface MinecraftAgentStatus {
   wsUrl: string;
   running: boolean;
@@ -317,6 +342,7 @@ export interface MinecraftAgentStatus {
   lastScreenshot: MinecraftAgentScreenshot | null;
   lastInventory: Record<string, number>;
   lastInventoryAt: number;
+  worldState: MinecraftAgentWorldState | null;
   lastNudgeKind: MinecraftAgentNudge['kind'] | null;
   lastNudgeAt: number;
   lastError: string | null;

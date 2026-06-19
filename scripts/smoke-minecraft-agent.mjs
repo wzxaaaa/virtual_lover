@@ -6,6 +6,7 @@ import path from 'node:path';
 const DEFAULT_WS_URL = process.env.MC_AGENT_WS || process.env.NEKO_GAME_AGENT_WS || 'ws://localhost:48909';
 const DEFAULT_TASK = 'look around briefly, then stop somewhere safe';
 const SOCKET_OPEN = 1;
+const MOCK_SCENARIOS = new Set(['normal', 'stale-task-id']);
 
 function usage() {
   console.log(`Minecraft Agent smoke test
@@ -15,10 +16,12 @@ Usage:
   npm run smoke:minecraft-agent -- "collect wood by chopping one nearby tree"
   npm run smoke:minecraft-agent -- --ws ws://localhost:48909 --timeout 120 --dump-dir .tmp/mc-smoke
   npm run smoke:minecraft-agent -- --mock --timeout 5
+  npm run smoke:minecraft-agent -- --mock --scenario stale-task-id --timeout 5
 
 Options:
   --ws <url>                  mc-agent WebSocket URL. Default: ${DEFAULT_WS_URL}
   --mock                      start an in-process mock mc-agent and run the smoke against it
+  --scenario <name>           mock scenario: normal, stale-task-id. Default: normal
   --timeout <seconds>         task_finished wait timeout. Default: 90
   --connect-timeout <seconds> connection timeout. Default: 5
   --inventory-timeout <sec>   inventory wait window before task send. Default: 2
@@ -37,7 +40,8 @@ function parseArgs(argv) {
     inventoryTimeoutMs: 2_000,
     dumpDir: '',
     statusOnly: false,
-    mock: false
+    mock: false,
+    scenario: 'normal'
   };
   const positional = [];
 
@@ -53,6 +57,10 @@ function parseArgs(argv) {
     }
     if (arg === '--mock') {
       options.mock = true;
+      continue;
+    }
+    if (arg === '--scenario') {
+      options.scenario = argv[++index] || options.scenario;
       continue;
     }
     if (arg === '--timeout') {
@@ -80,6 +88,9 @@ function parseArgs(argv) {
 
   if (positional.length > 0) {
     options.task = positional.join(' ').trim() || DEFAULT_TASK;
+  }
+  if (!MOCK_SCENARIOS.has(options.scenario)) {
+    throw new Error(`Unknown mock scenario "${options.scenario}". Expected one of: ${Array.from(MOCK_SCENARIOS).join(', ')}`);
   }
 
   return options;
@@ -357,7 +368,7 @@ function mockScreenshotBase64() {
   return 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=';
 }
 
-function startMockMinecraftAgentServer() {
+function startMockMinecraftAgentServer({ scenario = 'normal' } = {}) {
   const sockets = new Set();
   const received = [];
   const server = net.createServer((socket) => {
@@ -394,7 +405,7 @@ function startMockMinecraftAgentServer() {
         );
         handshaken = true;
         pending = pending.subarray(Buffer.byteLength(request.slice(0, endIndex + 4)));
-        sendMockFrame(socket, { type: 'agent_status', connected: true, mock: true });
+        sendMockFrame(socket, { type: 'agent_status', connected: true, mock: true, scenario });
         sendMockFrame(socket, { type: 'log', text: 'mock mc-agent ready' });
       }
 
@@ -428,6 +439,18 @@ function startMockMinecraftAgentServer() {
           const taskId = typeof frame.task_id === 'string' ? frame.task_id : typeof frame.taskId === 'string' ? frame.taskId : '';
           sendMockFrame(socket, { type: 'log', text: `mock accepted task: ${taskText}` });
           sendMockFrame(socket, { type: 'screenshot', image: mockScreenshotBase64(), encoding: 'png' });
+          if (scenario === 'stale-task-id') {
+            setTimeout(() => {
+              if (!socket.destroyed) {
+                sendMockFrame(socket, {
+                  type: 'task_finished',
+                  status: 'ok',
+                  text: `mock stale completion before active task: ${taskText}`,
+                  task_id: taskId ? `${taskId}-stale` : 'stale-task-id'
+                });
+              }
+            }, 40);
+          }
           setTimeout(() => {
             if (!socket.destroyed) {
               sendMockFrame(socket, {
@@ -517,13 +540,16 @@ function summarizeInventory(frame) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  if (options.scenario !== 'normal' && !options.mock) {
+    throw new Error('--scenario currently applies to --mock runs only.');
+  }
 
-  const mockServer = options.mock ? await startMockMinecraftAgentServer() : null;
+  const mockServer = options.mock ? await startMockMinecraftAgentServer({ scenario: options.scenario }) : null;
   if (mockServer) {
     options.wsUrl = mockServer.url;
     options.connectTimeoutMs = Math.min(options.connectTimeoutMs, 2_000);
     options.inventoryTimeoutMs = Math.min(options.inventoryTimeoutMs, 200);
-    console.log(`[mc-smoke] mock mc-agent listening at ${mockServer.url}`);
+    console.log(`[mc-smoke] mock mc-agent listening at ${mockServer.url} scenario=${options.scenario}`);
   }
 
   const taskId = randomUUID();
@@ -540,6 +566,7 @@ async function main() {
   let latestInventory = null;
   let finished = null;
   let sawTaskIdEcho = false;
+  let ignoredTaskFinished = 0;
 
   console.log(`[mc-smoke] connecting ${options.wsUrl}`);
   const socket = createSmokeWebSocket(options.wsUrl);
@@ -594,6 +621,9 @@ async function main() {
         }
         if (!options.statusOnly && (!echoedTaskId || echoedTaskId === taskId)) {
           finished = frame;
+        } else if (!options.statusOnly && echoedTaskId && echoedTaskId !== taskId) {
+          ignoredTaskFinished += 1;
+          console.log(`[mc-smoke] ignored task_finished for stale task_id=${echoedTaskId}`);
         }
       }
     })().catch((error) => {
@@ -629,9 +659,11 @@ async function main() {
 
   console.log('[mc-smoke] summary', {
     counts,
+    scenario: options.mock ? options.scenario : 'real-agent',
     inventory: latestInventory ? summarizeInventory(latestInventory) : 'not received',
     screenshots: screenshots.length,
     taskIdEcho: sawTaskIdEcho,
+    ignoredTaskFinished,
     finished: finished
       ? {
           status: finished.status || 'unknown',

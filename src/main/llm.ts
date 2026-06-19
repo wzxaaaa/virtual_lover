@@ -7,6 +7,7 @@ import {
   ConversationMessage,
   ActionResult,
   MemoryState,
+  MinecraftAgentWorldState,
   Mood,
   ProviderEndpointConfig,
   ScreenCapture,
@@ -249,6 +250,31 @@ function formatMinecraftInventory(inventory: Record<string, number>): string {
   return items.length > 0 ? items.join('、') : '空';
 }
 
+function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null): string {
+  if (!worldState) {
+    return '身体状态：暂无真实数据。';
+  }
+
+  const position = worldState.position
+    ? `坐标 ${worldState.position.x.toFixed(1)}, ${worldState.position.y.toFixed(1)}, ${worldState.position.z.toFixed(1)}`
+    : '';
+  const health =
+    worldState.health !== undefined ? `血量 ${worldState.health}${worldState.maxHealth !== undefined ? `/${worldState.maxHealth}` : ''}` : '';
+  const food = worldState.food !== undefined ? `饥饿 ${worldState.food}` : '';
+  const place = [worldState.dimension, worldState.biome].filter(Boolean).join(' / ');
+  const held = worldState.selectedItem ? `手持 ${worldState.selectedItem}` : '';
+  const equipment = worldState.equipment
+    ? `装备 ${Object.entries(worldState.equipment)
+        .slice(0, 6)
+        .map(([slot, item]) => `${slot}:${item}`)
+        .join('、')}`
+    : '';
+  const nearby = worldState.nearbyEntities?.length ? `附近 ${worldState.nearbyEntities.slice(0, 8).join('、')}` : '';
+  const parts = [position, health, food, place ? `地点 ${place}` : '', held, equipment, nearby].filter(Boolean);
+
+  return parts.length > 0 ? `身体状态：${parts.join('；')}。更新时间：${new Date(worldState.updatedAt).toLocaleString('zh-CN')}。` : '身体状态：暂无真实数据。';
+}
+
 function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolean): string {
   const status = request.minecraftStatus;
   if (!status) {
@@ -262,6 +288,7 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
     status.lastNudgeAt > 0
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleString('zh-CN')}。`
       : '最近自主判断：暂无。',
+    formatMinecraftWorldState(status.worldState),
     status.lastInventoryAt > 0 ? `当前背包：${formatMinecraftInventory(status.lastInventory)}` : '当前背包：暂无真实数据',
     status.lastScreenshot
       ? includesImage

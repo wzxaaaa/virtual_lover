@@ -8,7 +8,8 @@ import type {
   MinecraftAgentScreenshot,
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
-  MinecraftAgentTaskResult
+  MinecraftAgentTaskResult,
+  MinecraftAgentWorldState
 } from '../shared/types';
 
 type PendingTask = {
@@ -67,6 +68,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function stringOrEmpty(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  const number = typeof value === 'number' ? value : typeof value === 'string' && value.trim() ? Number(value) : NaN;
+  return Number.isFinite(number) ? Math.round(number * 100) / 100 : undefined;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const text = value.trim();
+  return text ? text : undefined;
 }
 
 function normalizeWsUrl(value: unknown): string {
@@ -147,6 +162,201 @@ function normalizeInventory(value: unknown): Record<string, number> | null {
   }
 
   return output;
+}
+
+function itemLabel(value: unknown): string | undefined {
+  const direct = stringOrUndefined(value);
+  if (direct) {
+    return direct;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const label =
+    stringOrUndefined(value.displayName) ||
+    stringOrUndefined(value.display_name) ||
+    stringOrUndefined(value.name) ||
+    stringOrUndefined(value.id) ||
+    stringOrUndefined(value.type);
+  if (label) {
+    return label;
+  }
+
+  return isRecord(value.item) ? itemLabel(value.item) : undefined;
+}
+
+function normalizePosition(value: unknown): MinecraftAgentWorldState['position'] | undefined {
+  if (Array.isArray(value)) {
+    const [x, y, z] = value.map(numberOrUndefined);
+    return x !== undefined && y !== undefined && z !== undefined ? { x, y, z } : undefined;
+  }
+
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const nested =
+    isRecord(value.position) ? value.position : isRecord(value.pos) ? value.pos : isRecord(value.location) ? value.location : isRecord(value.coords) ? value.coords : value;
+  const x = numberOrUndefined(nested.x ?? nested.posX ?? nested.positionX);
+  const y = numberOrUndefined(nested.y ?? nested.posY ?? nested.positionY);
+  const z = numberOrUndefined(nested.z ?? nested.posZ ?? nested.positionZ);
+  if (x === undefined || y === undefined || z === undefined) {
+    return undefined;
+  }
+
+  const yaw = numberOrUndefined(nested.yaw);
+  const pitch = numberOrUndefined(nested.pitch);
+  return {
+    x,
+    y,
+    z,
+    ...(yaw !== undefined ? { yaw } : {}),
+    ...(pitch !== undefined ? { pitch } : {})
+  };
+}
+
+function normalizeEquipment(value: unknown): Record<string, string> | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const equipment: Record<string, string> = {};
+  for (const [slot, rawItem] of Object.entries(value)) {
+    const label = itemLabel(rawItem);
+    if (slot && label) {
+      equipment[slot] = label;
+    }
+  }
+
+  return Object.keys(equipment).length > 0 ? equipment : undefined;
+}
+
+function entityLabel(value: unknown): string | undefined {
+  const direct = stringOrUndefined(value);
+  if (direct) {
+    return direct;
+  }
+  if (!isRecord(value)) {
+    return undefined;
+  }
+
+  const label = itemLabel(value) || stringOrUndefined(value.entity) || stringOrUndefined(value.kind);
+  if (!label) {
+    return undefined;
+  }
+
+  const distance = numberOrUndefined(value.distance ?? value.dist);
+  return distance !== undefined ? `${label}(${distance}m)` : label;
+}
+
+function normalizeNearbyEntities(value: unknown): string[] | undefined {
+  let entities: string[] = [];
+  if (Array.isArray(value)) {
+    entities = value.map(entityLabel).filter((item): item is string => Boolean(item));
+  } else if (isRecord(value)) {
+    entities = Object.entries(value)
+      .map(([name, raw]) => {
+        const count = numberOrUndefined(raw);
+        return count !== undefined ? `${name}×${count}` : entityLabel(raw) || name;
+      })
+      .filter(Boolean);
+  }
+
+  const unique = Array.from(new Set(entities)).slice(0, 12);
+  return unique.length > 0 ? unique : undefined;
+}
+
+function statusCandidates(frame: Record<string, unknown>): Record<string, unknown>[] {
+  const candidates = [frame];
+  for (let index = 0; index < candidates.length && index < 12; index += 1) {
+    const candidate = candidates[index];
+    if (!candidate) {
+      continue;
+    }
+    for (const key of ['status', 'state', 'data', 'player', 'bot', 'agent']) {
+      const value = candidate[key];
+      if (isRecord(value) && !candidates.includes(value)) {
+        candidates.push(value);
+      }
+    }
+  }
+  return candidates;
+}
+
+function findStatusValue(candidates: Record<string, unknown>[], keys: string[]): unknown {
+  for (const candidate of candidates) {
+    for (const key of keys) {
+      if (candidate[key] !== undefined && candidate[key] !== null) {
+        return candidate[key];
+      }
+    }
+  }
+  return undefined;
+}
+
+function findStatusNumber(candidates: Record<string, unknown>[], keys: string[]): number | undefined {
+  return numberOrUndefined(findStatusValue(candidates, keys));
+}
+
+function findStatusString(candidates: Record<string, unknown>[], keys: string[]): string | undefined {
+  return stringOrUndefined(findStatusValue(candidates, keys));
+}
+
+function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorldState | null {
+  const candidates = statusCandidates(frame);
+  const position = normalizePosition(findStatusValue(candidates, ['position', 'pos', 'location', 'coords', 'xyz'])) || candidates.map(normalizePosition).find(Boolean);
+  const equipment = normalizeEquipment(findStatusValue(candidates, ['equipment', 'armor', 'gear']));
+  const nearbyEntities = normalizeNearbyEntities(findStatusValue(candidates, ['nearbyEntities', 'nearby_entities', 'entities', 'mobs']));
+  const selectedItem = itemLabel(findStatusValue(candidates, ['selectedItem', 'selected_item', 'heldItem', 'held_item', 'mainHand', 'main_hand']));
+
+  const worldState: MinecraftAgentWorldState = {
+    updatedAt: Date.now()
+  };
+  const health = findStatusNumber(candidates, ['health', 'hp']);
+  const maxHealth = findStatusNumber(candidates, ['maxHealth', 'max_health', 'healthMax', 'health_max']);
+  const food = findStatusNumber(candidates, ['food', 'hunger', 'foodLevel', 'food_level']);
+  const saturation = findStatusNumber(candidates, ['saturation']);
+  const level = findStatusNumber(candidates, ['level', 'xpLevel', 'xp_level']);
+  const xp = findStatusNumber(candidates, ['xp', 'experience']);
+  const dimension = findStatusString(candidates, ['dimension', 'world', 'realm']);
+  const biome = findStatusString(candidates, ['biome']);
+  const gameMode = findStatusString(candidates, ['gameMode', 'game_mode', 'mode']);
+
+  if (health !== undefined) worldState.health = health;
+  if (maxHealth !== undefined) worldState.maxHealth = maxHealth;
+  if (food !== undefined) worldState.food = food;
+  if (saturation !== undefined) worldState.saturation = saturation;
+  if (level !== undefined) worldState.level = level;
+  if (xp !== undefined) worldState.xp = xp;
+  if (dimension) worldState.dimension = dimension;
+  if (biome) worldState.biome = biome;
+  if (gameMode) worldState.gameMode = gameMode;
+  if (position) worldState.position = position;
+  if (selectedItem) worldState.selectedItem = selectedItem;
+  if (equipment) worldState.equipment = equipment;
+  if (nearbyEntities) worldState.nearbyEntities = nearbyEntities;
+
+  const hasUsefulState = Object.entries(worldState).some(([key, value]) => key !== 'updatedAt' && value !== undefined && value !== null);
+  return hasUsefulState ? worldState : null;
+}
+
+function cloneWorldState(worldState: MinecraftAgentWorldState | null): MinecraftAgentWorldState | null {
+  if (!worldState) {
+    return null;
+  }
+
+  const clone: MinecraftAgentWorldState = { ...worldState };
+  if (worldState.position) {
+    clone.position = { ...worldState.position };
+  }
+  if (worldState.equipment) {
+    clone.equipment = { ...worldState.equipment };
+  }
+  if (worldState.nearbyEntities) {
+    clone.nearbyEntities = [...worldState.nearbyEntities];
+  }
+  return clone;
 }
 
 function dataUrlForBytes(mimeType: string, bytes: Buffer): string {
@@ -317,6 +527,7 @@ class MinecraftAgentService {
   private screenshotCache: MinecraftAgentScreenshot[] = [];
   private lastInventory: Record<string, number> = {};
   private lastInventoryAt = 0;
+  private worldState: MinecraftAgentWorldState | null = null;
   private lastError: string | null = null;
   private lastTaskFinishedAt = 0;
   private lastInProgressNudgeAt = 0;
@@ -365,6 +576,7 @@ class MinecraftAgentService {
     this.lastKeepGoingNudgeAt = 0;
     this.lastNudgeKind = null;
     this.lastNudgeAt = 0;
+    this.worldState = null;
 
     const socket = this.socket;
     this.socket = null;
@@ -397,6 +609,7 @@ class MinecraftAgentService {
       lastScreenshot: this.screenshotCache.at(-1) ?? null,
       lastInventory: { ...this.lastInventory },
       lastInventoryAt: this.lastInventoryAt,
+      worldState: cloneWorldState(this.worldState),
       lastNudgeKind: this.lastNudgeKind,
       lastNudgeAt: this.lastNudgeAt,
       lastError: this.lastError
@@ -900,6 +1113,15 @@ class MinecraftAgentService {
     }
 
     if (type === 'agent_status') {
+      const worldState = normalizeWorldState(frame);
+      if (worldState) {
+        this.worldState = worldState;
+      }
+      const candidates = statusCandidates(frame);
+      const inventory = normalizeInventory(findStatusValue(candidates, ['inventory', 'items']));
+      if (inventory) {
+        this.updateInventory(inventory);
+      }
       this.emitStatus();
     }
   }

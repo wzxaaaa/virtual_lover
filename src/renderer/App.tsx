@@ -204,6 +204,22 @@ function isMinecraftAgentTaskResult(value: unknown): value is MinecraftAgentTask
   return value !== null && typeof value === 'object' && 'status' in value && 'query' in value && 'summary' in value;
 }
 
+function formatMinecraftWorldStateReply(status: MinecraftAgentStatus): string {
+  const state = status.worldState;
+  if (!state) {
+    return '';
+  }
+
+  const position = state.position ? `位置 ${state.position.x.toFixed(1)}, ${state.position.y.toFixed(1)}, ${state.position.z.toFixed(1)}` : '';
+  const health = state.health !== undefined ? `血量 ${state.health}${state.maxHealth !== undefined ? `/${state.maxHealth}` : ''}` : '';
+  const food = state.food !== undefined ? `饥饿 ${state.food}` : '';
+  const held = state.selectedItem ? `手持 ${state.selectedItem}` : '';
+  const nearby = state.nearbyEntities?.length ? `附近 ${state.nearbyEntities.slice(0, 4).join('、')}` : '';
+  const parts = [position, health, food, held, nearby].filter(Boolean);
+
+  return parts.length > 0 ? `我这边：${parts.join('；')}` : '';
+}
+
 function formatMinecraftStatusReply(result: AgentToolResult): string {
   if (!result.ok) {
     return '我现在还没有进入游戏世界，只能先看着画面陪你。';
@@ -226,8 +242,9 @@ function formatMinecraftStatusReply(result: AgentToolResult): string {
     .join('、');
   const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
   const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
+  const worldLine = formatMinecraftWorldStateReply(status);
   const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
-  return [taskLine, logLine, bagLine].filter(Boolean).join('\n');
+  return [taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
 }
 
 function formatMinecraftTaskReply(result: AgentToolResult): string {
@@ -346,8 +363,9 @@ function formatMinecraftStatusReplyLegacy(result: AgentToolResult): string {
     .join('、');
   const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
   const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
+  const worldLine = formatMinecraftWorldStateReply(status);
   const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
-  return [taskLine, logLine, bagLine].filter(Boolean).join('\n');
+  return [taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
 }
 
 function formatMinecraftTaskReplyLegacy(result: AgentToolResult): string {

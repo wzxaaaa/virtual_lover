@@ -1,4 +1,4 @@
-import type { AppConfig, MinecraftAgentStatus, ScreenObservation } from './types';
+import type { AppConfig, MinecraftAgentStatus, MinecraftAgentWorldState, ScreenObservation } from './types';
 
 export type GameCompanionTextIntent = 'start' | 'stop';
 export type MinecraftPluginTextIntent =
@@ -76,6 +76,25 @@ function normalizeMinecraftTask(text: string): string | null {
   return `follow this Minecraft player request: ${compactText.slice(0, 240)}`;
 }
 
+function formatMinecraftWorldState(worldState?: MinecraftAgentWorldState | null): string {
+  if (!worldState) {
+    return '';
+  }
+
+  const position = worldState.position
+    ? `位置：${worldState.position.x.toFixed(1)}, ${worldState.position.y.toFixed(1)}, ${worldState.position.z.toFixed(1)}`
+    : '';
+  const health =
+    worldState.health !== undefined ? `血量：${worldState.health}${worldState.maxHealth !== undefined ? `/${worldState.maxHealth}` : ''}` : '';
+  const food = worldState.food !== undefined ? `饥饿：${worldState.food}` : '';
+  const place = [worldState.dimension, worldState.biome].filter(Boolean).join(' / ');
+  const held = worldState.selectedItem ? `手持：${worldState.selectedItem}` : '';
+  const nearby = worldState.nearbyEntities?.length ? `附近：${worldState.nearbyEntities.slice(0, 6).join('、')}` : '';
+  const parts = [position, health, food, place ? `地点：${place}` : '', held, nearby].filter(Boolean);
+
+  return parts.length > 0 ? `身体状态：${parts.join('；')}` : '';
+}
+
 export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null): string {
   if (!status) {
     return 'Minecraft Agent：尚未查询。';
@@ -95,6 +114,7 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleTimeString('zh-CN')}`
       : '',
     status.lastLog ? `最近反馈：${status.lastLog}` : '',
+    formatMinecraftWorldState(status.worldState),
     inventoryItems ? `背包：${inventoryItems}` : status.lastInventoryAt > 0 ? '背包：空' : '',
     !status.connected ? '提示：还没有连接到她的 Minecraft 身体，需要先启动 mc-agent，并让独立账号进入同一个 LAN 世界。' : ''
   ]
