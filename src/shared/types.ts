@@ -405,6 +405,30 @@ export interface MinecraftAgentBlockInteractionState {
   remainingMs?: number;
 }
 
+export interface MinecraftAgentCollaborationContract {
+  followDistanceMin: number;
+  followDistanceMax: number;
+  regroupDistance: number;
+  avoidBlocking: boolean;
+  avoidLineOfSight: boolean;
+  avoidMiningUnderPlayer: boolean;
+  preserveUserResources: boolean;
+  sharedContainerPolicy: string;
+}
+
+export interface MinecraftAgentProtocolState {
+  updatedAt: number;
+  source: 'legacy' | 'agent' | 'status' | 'inferred';
+  clientName: string;
+  clientProtocolVersion: string;
+  agentName?: string;
+  agentVersion?: string;
+  agentProtocolVersion?: string;
+  capabilities: string[];
+  missingCapabilities: string[];
+  collaboration: MinecraftAgentCollaborationContract;
+}
+
 export interface MinecraftAgentWorldState {
   updatedAt: number;
   health?: number;
@@ -444,6 +468,7 @@ export interface MinecraftAgentStatus {
   lastInventory: Record<string, number>;
   lastInventoryAt: number;
   worldState: MinecraftAgentWorldState | null;
+  protocol: MinecraftAgentProtocolState | null;
   lastChatMessages: MinecraftAgentChatMessage[];
   planState: MinecraftAgentPlanState | null;
   lastNudgeKind: MinecraftAgentNudge['kind'] | null;
@@ -498,6 +523,10 @@ export type MinecraftAgentEvent =
   | {
       type: 'status';
       status: MinecraftAgentStatus;
+    }
+  | {
+      type: 'protocol';
+      protocol: MinecraftAgentProtocolState;
     }
   | {
       type: 'log';

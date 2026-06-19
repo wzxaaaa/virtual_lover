@@ -12,6 +12,7 @@ import {
   MinecraftAgentPlanState,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
+  MinecraftAgentProtocolState,
   MinecraftAgentTargetState,
   MinecraftAgentWorldState,
   Mood,
@@ -442,6 +443,22 @@ function formatMinecraftChat(messages: MinecraftAgentChatMessage[]): string {
     .join(' / ');
 }
 
+function formatMinecraftProtocolState(protocol?: MinecraftAgentProtocolState | null): string {
+  if (!protocol) {
+    return '协议能力：未确认，按 legacy mc-agent 兼容模式处理。';
+  }
+
+  const agent = [protocol.agentName, protocol.agentVersion].filter(Boolean).join(' ');
+  const confirmed = protocol.capabilities.length ? protocol.capabilities.slice(0, 12).join('、') : '暂无明确声明';
+  const missing = protocol.missingCapabilities.length ? protocol.missingCapabilities.join('、') : '无';
+  return [
+    `协议能力：${protocol.source}${agent ? `；agent ${agent}` : ''}${protocol.agentProtocolVersion ? `；agent 协议 ${protocol.agentProtocolVersion}` : ''}`,
+    `已确认：${confirmed}`,
+    `仍未确认：${missing}`,
+    `协作 contract：跟随 ${protocol.collaboration.followDistanceMin}-${protocol.collaboration.followDistanceMax} 格，超过 ${protocol.collaboration.regroupDistance} 格先找回/等待，不挡路/不挖用户脚下/不抢用户资源。`
+  ].join('；');
+}
+
 function formatMinecraftPlanState(planState?: MinecraftAgentPlanState | null): string {
   if (!planState) {
     return '目标阶段：暂无。';
@@ -469,6 +486,7 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
     `连接：${status.connected ? '已连接' : '未连接'}；当前任务：${status.pendingTask || '空闲'}`,
     status.activeGoal ? `这一局当前目标：${status.activeGoal}` : '这一局当前目标：暂无。',
     formatMinecraftPlanState(status.planState),
+    formatMinecraftProtocolState(status.protocol),
     `最近游戏聊天：${formatMinecraftChat(status.lastChatMessages ?? [])}`,
     status.lastLog ? `最近游戏反馈：${status.lastLog}` : '',
     status.lastNudgeAt > 0

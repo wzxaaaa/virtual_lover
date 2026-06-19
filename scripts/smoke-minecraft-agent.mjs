@@ -7,6 +7,34 @@ const DEFAULT_WS_URL = process.env.MC_AGENT_WS || process.env.NEKO_GAME_AGENT_WS
 const DEFAULT_TASK = 'look around briefly, then stop somewhere safe';
 const SOCKET_OPEN = 1;
 const MOCK_SCENARIOS = new Set(['normal', 'stale-task-id', 'rich-state', 'blocked-task', 'chat']);
+const CLIENT_PROTOCOL = {
+  name: 'virtual_lover',
+  protocol: 'virtual-lover-mc-agent/1',
+  capabilities: [
+    'task',
+    'task_id',
+    'query_inventory',
+    'game_chat',
+    'agent_status',
+    'tracked_player',
+    'nearby_players',
+    'path_state',
+    'danger_state',
+    'shared_containers',
+    'block_interaction',
+    'collaboration_contract'
+  ],
+  collaboration: {
+    followDistanceMin: 3,
+    followDistanceMax: 5,
+    regroupDistance: 8,
+    avoidBlocking: true,
+    avoidLineOfSight: true,
+    avoidMiningUnderPlayer: true,
+    preserveUserResources: true,
+    sharedContainerPolicy: 'deposit useful surplus items only; keep survival food/tools; never take resources the user is actively using'
+  }
+};
 
 function usage() {
   console.log(`Minecraft Agent smoke test
@@ -765,7 +793,7 @@ async function main() {
     if (!options.statusOnly) {
       console.log(`[mc-smoke] task_id=${taskId}`);
       console.log(`[mc-smoke] task=${options.task}`);
-      sendJson(socket, { type: 'task', task: options.task, task_id: taskId });
+      sendJson(socket, { type: 'task', task: options.task, task_id: taskId, client: CLIENT_PROTOCOL });
 
       const deadline = Date.now() + options.timeoutMs;
       while (!finished && Date.now() < deadline) {

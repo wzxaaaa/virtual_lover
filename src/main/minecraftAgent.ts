@@ -6,6 +6,7 @@ import type {
   MinecraftAgentBlockInteractionState,
   MinecraftAgentChatMessage,
   MinecraftAgentChatResult,
+  MinecraftAgentCollaborationContract,
   MinecraftAgentContainerState,
   MinecraftAgentEvent,
   MinecraftAgentDangerState,
@@ -15,6 +16,7 @@ import type {
   MinecraftAgentPlanStepStatus,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
+  MinecraftAgentProtocolState,
   MinecraftAgentScreenshot,
   MinecraftAgentStatus,
   MinecraftAgentTaskRequest,
@@ -55,6 +57,43 @@ const IN_PROGRESS_NUDGE_COOLDOWN_MS = 8000;
 const KEEP_GOING_NUDGE_AFTER_MS = 8000;
 const KEEP_GOING_NUDGE_COOLDOWN_MS = 10000;
 const OVERWRITE_MIN_SURVIVAL_MS = 2000;
+const MINECRAFT_AGENT_CLIENT_NAME = 'virtual_lover';
+const MINECRAFT_AGENT_PROTOCOL_VERSION = 'virtual-lover-mc-agent/1';
+const MINECRAFT_AGENT_CLIENT_CAPABILITIES = [
+  'task',
+  'task_id',
+  'query_inventory',
+  'game_chat',
+  'agent_status',
+  'tracked_player',
+  'nearby_players',
+  'path_state',
+  'danger_state',
+  'shared_containers',
+  'block_interaction',
+  'collaboration_contract'
+] as const;
+const MINECRAFT_AGENT_REQUIRED_CAPABILITIES = [
+  'task_id_echo',
+  'agent_status',
+  'tracked_player',
+  'nearby_players',
+  'path_state',
+  'danger_state',
+  'game_chat',
+  'shared_containers',
+  'block_interaction'
+] as const;
+const MINECRAFT_AGENT_COLLABORATION_CONTRACT: MinecraftAgentCollaborationContract = {
+  followDistanceMin: 3,
+  followDistanceMax: 5,
+  regroupDistance: 8,
+  avoidBlocking: true,
+  avoidLineOfSight: true,
+  avoidMiningUnderPlayer: true,
+  preserveUserResources: true,
+  sharedContainerPolicy: 'deposit useful surplus items only; keep survival food/tools; never take resources the user is actively using'
+};
 const electronRuntime = electron as Partial<typeof import('electron')> | string;
 const nativeImage = typeof electronRuntime === 'object' && electronRuntime ? electronRuntime.nativeImage : undefined;
 const BLOCKED_TASK_FEEDBACK_MARKERS = [
@@ -482,6 +521,128 @@ function normalizeStringList(value: unknown): string[] | undefined {
 
   const unique = Array.from(new Set(items)).slice(0, 10);
   return unique.length > 0 ? unique : undefined;
+}
+
+function normalizeCapabilityName(value: string): string {
+  return value
+    .trim()
+    .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+    .replace(/[\s.-]+/g, '_')
+    .toLowerCase();
+}
+
+function normalizeCapabilities(value: unknown): string[] {
+  let capabilities: string[] = [];
+
+  if (Array.isArray(value)) {
+    capabilities = value.flatMap((item) => normalizeCapabilities(item));
+  } else if (typeof value === 'string') {
+    capabilities = value
+      .split(/[,;/\s]+/g)
+      .map(normalizeCapabilityName)
+      .filter(Boolean);
+  } else if (isRecord(value)) {
+    capabilities = Object.entries(value).flatMap(([key, raw]) => {
+      if (raw === false || raw === null || raw === undefined) {
+        return [];
+      }
+      if (raw === true || typeof raw === 'number') {
+        return [normalizeCapabilityName(key)];
+      }
+      if (typeof raw === 'string') {
+        return raw.trim() ? [normalizeCapabilityName(raw)] : [normalizeCapabilityName(key)];
+      }
+      return normalizeCapabilities(raw);
+    });
+  }
+
+  return Array.from(new Set(capabilities.filter(Boolean)));
+}
+
+function protocolCandidates(frame: Record<string, unknown>): Record<string, unknown>[] {
+  const candidates = statusCandidates(frame);
+  for (let index = 0; index < candidates.length && index < 16; index += 1) {
+    const candidate = candidates[index];
+    for (const key of ['protocol', 'capabilities', 'caps', 'features', 'supports', 'client', 'server']) {
+      const value = candidate[key];
+      if (isRecord(value) && !candidates.includes(value)) {
+        candidates.push(value);
+      }
+    }
+  }
+  return candidates;
+}
+
+function normalizeProtocolSource(value: MinecraftAgentProtocolState['source'], current?: MinecraftAgentProtocolState | null): MinecraftAgentProtocolState['source'] {
+  if (!current) {
+    return value;
+  }
+  if (current.source === 'agent') {
+    return 'agent';
+  }
+  if (value === 'agent') {
+    return 'agent';
+  }
+  if (current.source === 'status' || value === 'status') {
+    return 'status';
+  }
+  if (current.source === 'inferred' || value === 'inferred') {
+    return 'inferred';
+  }
+  return 'legacy';
+}
+
+function protocolMissingCapabilities(capabilities: string[]): string[] {
+  const known = new Set(capabilities);
+  return MINECRAFT_AGENT_REQUIRED_CAPABILITIES.filter((capability) => !known.has(capability));
+}
+
+function createProtocolState(input: {
+  source: MinecraftAgentProtocolState['source'];
+  current?: MinecraftAgentProtocolState | null;
+  frame?: Record<string, unknown>;
+  capabilities?: string[];
+}): MinecraftAgentProtocolState {
+  const candidates = input.frame ? protocolCandidates(input.frame) : [];
+  const explicitCapabilities = candidates.flatMap((candidate) =>
+    normalizeCapabilities(candidate.capabilities ?? candidate.caps ?? candidate.features ?? candidate.supports)
+  );
+  const capabilities = Array.from(
+    new Set([...(input.current?.capabilities ?? []), ...explicitCapabilities, ...(input.capabilities ?? [])].map(normalizeCapabilityName).filter(Boolean))
+  ).sort();
+  const agentName =
+    findStatusString(candidates, ['agentName', 'agent_name', 'serverName', 'server_name', 'name', 'agent']) || input.current?.agentName;
+  const agentVersion =
+    findStatusString(candidates, ['agentVersion', 'agent_version', 'version', 'build', 'buildVersion', 'build_version']) || input.current?.agentVersion;
+  const agentProtocolVersion =
+    findStatusString(candidates, ['protocolVersion', 'protocol_version', 'protocol', 'schemaVersion', 'schema_version']) ||
+    input.current?.agentProtocolVersion;
+
+  return {
+    updatedAt: Date.now(),
+    source: normalizeProtocolSource(input.source, input.current),
+    clientName: MINECRAFT_AGENT_CLIENT_NAME,
+    clientProtocolVersion: MINECRAFT_AGENT_PROTOCOL_VERSION,
+    ...(agentName ? { agentName } : {}),
+    ...(agentVersion ? { agentVersion } : {}),
+    ...(agentProtocolVersion ? { agentProtocolVersion } : {}),
+    capabilities,
+    missingCapabilities: protocolMissingCapabilities(capabilities),
+    collaboration: { ...MINECRAFT_AGENT_COLLABORATION_CONTRACT }
+  };
+}
+
+function cloneProtocolState(protocol: MinecraftAgentProtocolState | null): MinecraftAgentProtocolState | null {
+  if (!protocol) {
+    return null;
+  }
+
+  return {
+    ...protocol,
+    capabilities: [...protocol.capabilities],
+    missingCapabilities: [...protocol.missingCapabilities],
+    collaboration: { ...protocol.collaboration }
+  };
 }
 
 function normalizeDangerState(value: unknown, health: number | undefined): MinecraftAgentDangerState | null {
@@ -1015,6 +1176,7 @@ export class MinecraftAgentService {
   private lastInventory: Record<string, number> = {};
   private lastInventoryAt = 0;
   private worldState: MinecraftAgentWorldState | null = null;
+  private protocolState: MinecraftAgentProtocolState | null = null;
   private lastError: string | null = null;
   private lastTaskFinishedAt = 0;
   private lastInProgressNudgeAt = 0;
@@ -1067,6 +1229,7 @@ export class MinecraftAgentService {
     this.activeGoalUpdatedAt = 0;
     this.resetPlanState();
     this.worldState = null;
+    this.protocolState = null;
     this.chatCache = [];
 
     const socket = this.socket;
@@ -1103,6 +1266,7 @@ export class MinecraftAgentService {
       lastInventory: { ...this.lastInventory },
       lastInventoryAt: this.lastInventoryAt,
       worldState: cloneWorldState(this.worldState),
+      protocol: cloneProtocolState(this.protocolState),
       lastChatMessages: this.chatCache.map((message) => ({ ...message })),
       planState: this.buildPlanState(),
       lastNudgeKind: this.lastNudgeKind,
@@ -1388,11 +1552,36 @@ export class MinecraftAgentService {
   }
 
   private sendTaskFrame(taskText: string, taskId: string): boolean {
-    const sent = this.sendJson({ type: 'task', task: taskText, task_id: taskId });
+    const sent = this.sendJson({
+      type: 'task',
+      task: taskText,
+      task_id: taskId,
+      client: {
+        name: MINECRAFT_AGENT_CLIENT_NAME,
+        protocol: MINECRAFT_AGENT_PROTOCOL_VERSION,
+        capabilities: [...MINECRAFT_AGENT_CLIENT_CAPABILITIES],
+        collaboration: { ...MINECRAFT_AGENT_COLLABORATION_CONTRACT }
+      }
+    });
     if (sent) {
       this.rememberDispatchedTask(taskId, taskText);
     }
     return sent;
+  }
+
+  private updateProtocolState(
+    source: MinecraftAgentProtocolState['source'],
+    frame?: Record<string, unknown>,
+    capabilities: string[] = []
+  ): MinecraftAgentProtocolState {
+    this.protocolState = createProtocolState({
+      source,
+      current: this.protocolState,
+      frame,
+      capabilities
+    });
+    this.events.emit('event', { type: 'protocol', protocol: cloneProtocolState(this.protocolState)! } satisfies MinecraftAgentEvent);
+    return this.protocolState;
   }
 
   private updateActiveGoalFromRequest(request: MinecraftAgentTaskRequest, taskText: string): void {
@@ -1517,6 +1706,7 @@ export class MinecraftAgentService {
         }
         this.connected = true;
         this.lastError = null;
+        this.updateProtocolState('legacy', undefined, ['task', 'query_inventory']);
         this.emitStatus();
       };
       socket.onmessage = (event) => {
@@ -1702,7 +1892,13 @@ export class MinecraftAgentService {
   }
 
   private handleFrame(frame: Record<string, unknown>): void {
-    const type = stringOrEmpty(frame.type);
+    const type = stringOrEmpty(frame.type).toLowerCase();
+    if (type === 'hello' || type === 'agent_hello' || type === 'capabilities' || type === 'agent_capabilities' || type === 'protocol') {
+      this.updateProtocolState('agent', frame);
+      this.emitStatus();
+      return;
+    }
+
     if (type === 'log') {
       const text = stringOrEmpty(frame.text) || stringOrEmpty(frame.data) || stringOrEmpty(frame.message);
       if (text) {
@@ -1725,6 +1921,7 @@ export class MinecraftAgentService {
     if (type === 'chat' || type === 'game_chat' || type === 'player_chat' || type === 'message') {
       const message = chatMessageFromFrame(frame);
       if (message) {
+        this.updateProtocolState('inferred', undefined, ['game_chat']);
         this.pushChat(message);
         this.pushLog(`[chat] ${formatChatLine(message)}`);
         this.events.emit('event', { type: 'chat', message } satisfies MinecraftAgentEvent);
@@ -1773,6 +1970,15 @@ export class MinecraftAgentService {
       if (worldState) {
         this.worldState = worldState;
       }
+      this.updateProtocolState('status', frame, [
+        'agent_status',
+        ...(worldState?.trackedPlayer ? ['tracked_player'] : []),
+        ...(worldState?.nearbyPlayers?.length ? ['nearby_players'] : []),
+        ...(worldState?.path ? ['path_state'] : []),
+        ...(worldState?.danger ? ['danger_state'] : []),
+        ...(worldState?.sharedContainers?.length ? ['shared_containers'] : []),
+        ...(worldState?.blockInteraction ? ['block_interaction'] : [])
+      ]);
       const candidates = statusCandidates(frame);
       const inventory = normalizeInventory(findStatusValue(candidates, ['inventory', 'items']));
       if (inventory) {
@@ -1786,6 +1992,7 @@ export class MinecraftAgentService {
     const historicalTaskText = taskId ? this.dispatchedHistory.get(taskId) : undefined;
     if (taskId && (pending?.taskId === taskId || historicalTaskText)) {
       this.seenTaskIdEcho = true;
+      this.updateProtocolState('inferred', undefined, ['task_id_echo']);
     }
 
     if (pending) {

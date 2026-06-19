@@ -139,6 +139,7 @@ function previewMinecraftAgentStatus(): MinecraftAgentStatus {
     lastInventory: {},
     lastInventoryAt: 0,
     worldState: null,
+    protocol: null,
     lastChatMessages: [],
     planState: null,
     lastNudgeKind: null,

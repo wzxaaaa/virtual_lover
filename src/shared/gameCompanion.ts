@@ -3,6 +3,7 @@ import type {
   MinecraftAgentDangerState,
   MinecraftAgentPathState,
   MinecraftAgentPlayerState,
+  MinecraftAgentProtocolState,
   MinecraftAgentStatus,
   MinecraftAgentTargetState,
   MinecraftAgentWorldState,
@@ -300,6 +301,21 @@ function formatMinecraftRecentChat(status: MinecraftAgentStatus): string {
     .join(' / ')}`;
 }
 
+function formatMinecraftProtocolState(protocol?: MinecraftAgentProtocolState | null): string {
+  if (!protocol) {
+    return '协议能力：未确认，按 legacy mc-agent 兼容模式处理。';
+  }
+
+  const agent = [protocol.agentName, protocol.agentVersion].filter(Boolean).join(' ');
+  const missing = protocol.missingCapabilities.length ? protocol.missingCapabilities.join('、') : '无';
+  return [
+    `协议能力：${protocol.source}${agent ? ` ${agent}` : ''}`,
+    `已确认：${protocol.capabilities.length ? protocol.capabilities.slice(0, 10).join('、') : '暂无明确声明'}`,
+    `未确认：${missing}`,
+    `协作约束：跟随 ${protocol.collaboration.followDistanceMin}-${protocol.collaboration.followDistanceMax} 格，超过 ${protocol.collaboration.regroupDistance} 格先找回/等待`
+  ].join('；');
+}
+
 function formatMinecraftPlanState(status: MinecraftAgentStatus): string {
   const planState = status.planState;
   if (!planState) {
@@ -338,6 +354,7 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
       : '',
     status.lastLog ? `最近反馈：${status.lastLog}` : '',
     formatMinecraftRecentChat(status),
+    formatMinecraftProtocolState(status.protocol),
     formatMinecraftWorldState(status.worldState),
     formatMinecraftCollaborationState(status.worldState),
     inventoryItems ? `背包：${inventoryItems}` : status.lastInventoryAt > 0 ? '背包：空' : '',

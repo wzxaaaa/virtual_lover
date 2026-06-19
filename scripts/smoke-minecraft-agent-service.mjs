@@ -266,6 +266,23 @@ class MockMinecraftAgent {
         handshaken = true;
         this.sockets.add(socket);
         pending = pending.subarray(endIndex + 4);
+        this.send({
+          type: 'agent_hello',
+          agentName: 'mock-mc-agent',
+          agentVersion: 'smoke',
+          protocolVersion: 'virtual-lover-mc-agent/1',
+          capabilities: [
+            'task_id_echo',
+            'agent_status',
+            'tracked_player',
+            'nearby_players',
+            'path_state',
+            'danger_state',
+            'game_chat',
+            'shared_containers',
+            'block_interaction'
+          ]
+        });
         this.send({ type: 'agent_status', connected: true, mock: true, position: { x: 0, y: 64, z: 0 } });
       }
 
@@ -348,10 +365,18 @@ async function main() {
     );
     assert(inventory.inventory.torch === 8, 'inventory payload should be normalized');
     await waitFor(() => events.find((event) => event.type === 'inventory'), 'inventory event');
+    const protocolEvent = await waitFor(
+      () => events.find((event) => event.type === 'protocol' && event.protocol?.agentName === 'mock-mc-agent'),
+      'agent protocol event'
+    );
+    assert(protocolEvent.protocol.missingCapabilities.length === 0, 'mock protocol should satisfy all required capabilities');
+    assert(service.getStatus().protocol?.capabilities.includes('shared_containers'), 'status should expose declared shared container capability');
 
     const first = await service.dispatchTask(config, { task: 'first long task', goal: 'service smoke', timeoutMs: 30000 });
     assert(first.status === 'dispatched' && first.taskId, 'first task should be dispatched');
-    await mock.waitForFrame((frame) => frame.type === 'task' && frame.task === 'first long task', 'first task frame');
+    const firstFrame = await mock.waitForFrame((frame) => frame.type === 'task' && frame.task === 'first long task', 'first task frame');
+    assert(firstFrame.client?.protocol === 'virtual-lover-mc-agent/1', 'task frame should carry client protocol metadata');
+    assert(firstFrame.client?.collaboration?.followDistanceMin === 3, 'task frame should carry collaboration contract');
     await waitFor(() => events.find((event) => event.type === 'status' && event.status?.pendingTask === 'first long task'), 'pending status event');
 
     const busy = await service.dispatchTask(config, { task: 'second should be busy', timeoutMs: 30000 });
