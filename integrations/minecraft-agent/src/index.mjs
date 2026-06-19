@@ -76,6 +76,8 @@ let commandFollowTimer = null;
 let commandFollowState = null;
 let commandFollowInFlight = false;
 let ownerEntityIdHint = null;
+let reconnectTimer = null;
+let shuttingDown = false;
 
 function now() {
   return Date.now();
@@ -197,6 +199,15 @@ function inventorySnapshot() {
   return inventory;
 }
 
+function inventoryCount(itemNames) {
+  if (!bot?.inventory) return 0;
+  const wanted = new Set(itemNames);
+  return bot.inventory
+    .items()
+    .filter((item) => wanted.has(item.name))
+    .reduce((total, item) => total + item.count, 0);
+}
+
 function vecToPlain(vec) {
   if (!vec) return null;
   return {
@@ -209,6 +220,10 @@ function vecToPlain(vec) {
 function distanceToBot(entity) {
   if (!bot?.entity?.position || !entity?.position) return null;
   return bot.entity.position.distanceTo(entity.position);
+}
+
+function isBotConnectedToWorld() {
+  return Boolean(bot?.entity && worldJoinState.connectedToWorld);
 }
 
 function textValue(value) {
@@ -536,9 +551,10 @@ function statusPayload() {
   const tracked = findOwnerOrNearestPlayer();
   const trackedPlayer = tracked ? playerState(tracked.name, tracked.player) : null;
   const selected = bot?.heldItem ?? bot?.quickBarSlotItem;
+  const connectedToWorld = isBotConnectedToWorld();
   return {
     type: 'agent_status',
-    connected: Boolean(bot?.entity),
+    connected: connectedToWorld,
     agentName: AGENT_NAME,
     agentVersion: AGENT_VERSION,
     protocolVersion: PROTOCOL_VERSION,
@@ -548,8 +564,8 @@ function statusPayload() {
     username: bot?.username || config.minecraft.username,
     worldJoin: {
       ...worldJoinState,
-      connectedToWorld: Boolean(bot?.entity) || worldJoinState.connectedToWorld,
-      phase: bot?.entity ? 'joined' : worldJoinState.phase,
+      connectedToWorld,
+      phase: connectedToWorld ? 'joined' : worldJoinState.phase,
       username: bot?.username || worldJoinState.username || config.minecraft.username,
       host: worldJoinState.host || config.minecraft.host,
       port: worldJoinState.port || config.minecraft.port,
@@ -605,7 +621,28 @@ function publishInventory() {
   });
 }
 
+function clearReconnectTimer() {
+  if (!reconnectTimer) return;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function scheduleReconnect(reason) {
+  if (shuttingDown || reconnectTimer) return;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void connectMinecraft().catch((error) => {
+      const message = error instanceof Error ? error.message : String(error);
+      setWorldJoinState('error', `Minecraft reconnect failed after ${reason}: ${message}`);
+      log(`Minecraft reconnect failed after ${reason}: ${message}`);
+      publishStatus();
+      scheduleReconnect('failed reconnect');
+    });
+  }, 3000);
+}
+
 async function connectMinecraft() {
+  clearReconnectTimer();
   setWorldJoinState('joining', `Connecting Minecraft bot to ${config.minecraft.host}:${config.minecraft.port}.`);
   const options = {
     host: config.minecraft.host,
@@ -615,74 +652,88 @@ async function connectMinecraft() {
     version: config.minecraft.version || false
   };
 
-  bot = mineflayer.createBot(options);
-  bot.loadPlugin(pathfinderPlugin);
+  const nextBot = mineflayer.createBot(options);
+  bot = nextBot;
+  nextBot.loadPlugin(pathfinderPlugin);
 
-  bot.once('spawn', () => {
-    mcData = minecraftData(bot.version);
-    defaultMovements = new Movements(bot, mcData);
-    bot.pathfinder.setMovements(defaultMovements);
-    lastHealth = bot.health;
-    setWorldJoinState('joined', `Minecraft bot joined as ${bot.username} on ${config.minecraft.host}:${config.minecraft.port}.`);
-    log(`Minecraft bot spawned as ${bot.username} on ${config.minecraft.host}:${config.minecraft.port}`);
+  nextBot.once('spawn', () => {
+    if (bot !== nextBot) return;
+    mcData = minecraftData(nextBot.version);
+    defaultMovements = new Movements(nextBot, mcData);
+    nextBot.pathfinder.setMovements(defaultMovements);
+    lastHealth = nextBot.health;
+    setWorldJoinState('joined', `Minecraft bot joined as ${nextBot.username} on ${config.minecraft.host}:${config.minecraft.port}.`);
+    log(`Minecraft bot spawned as ${nextBot.username} on ${config.minecraft.host}:${config.minecraft.port}`);
     publishStatus();
   });
 
-  bot.on('chat', (username, message) => {
+  nextBot.on('chat', (username, message) => {
+    if (bot !== nextBot) return;
     broadcast({
       type: 'chat',
       sender: username,
-      role: username === bot.username ? 'bot' : 'player',
+      role: username === nextBot.username ? 'bot' : 'player',
       text: message,
       timestamp: now()
     });
   });
 
-  bot.on('health', () => {
-    if (lastHealth !== null && bot.health < lastHealth) {
+  nextBot.on('health', () => {
+    if (bot !== nextBot) return;
+    if (lastHealth !== null && nextBot.health < lastHealth) {
       broadcast({
         type: 'alert',
-        severity: bot.health <= 6 ? 'danger' : 'warn',
+        severity: nextBot.health <= 6 ? 'danger' : 'warn',
         cause: 'damage',
-        text: `Bot took damage. Health ${bot.health}.`,
-        health: bot.health,
-        food: bot.food
+        text: `Bot took damage. Health ${nextBot.health}.`,
+        health: nextBot.health,
+        food: nextBot.food
       });
     }
-    lastHealth = bot.health;
+    lastHealth = nextBot.health;
     publishStatus();
   });
 
-  bot.on('death', () => {
+  nextBot.on('death', () => {
+    if (bot !== nextBot) return;
     clearCommandFollow();
     broadcast({ type: 'alert', severity: 'danger', cause: 'death', text: 'Bot died.' });
     finishTask('blocked', 'I died before finishing the task.');
   });
 
-  bot.on('kicked', (reason) => {
+  nextBot.on('kicked', (reason) => {
+    if (bot !== nextBot) return;
     setWorldJoinState('rejected', `Minecraft bot kicked: ${String(reason)}`);
     log(`Minecraft bot kicked: ${String(reason)}`);
     broadcast({ type: 'alert', severity: 'error', cause: 'kicked', text: String(reason) });
+    finishTask('blocked', `Minecraft bot kicked: ${String(reason)}`);
     publishStatus();
   });
 
-  bot.on('error', (error) => {
+  nextBot.on('error', (error) => {
+    if (bot !== nextBot) return;
     setWorldJoinState('error', `Minecraft bot error: ${error instanceof Error ? error.message : String(error)}`);
     log(`Minecraft bot error: ${error instanceof Error ? error.message : String(error)}`);
     broadcast({ type: 'alert', severity: 'error', cause: 'bot_error', text: error instanceof Error ? error.message : String(error) });
+    finishTask('blocked', `Minecraft bot error: ${error instanceof Error ? error.message : String(error)}`);
     publishStatus();
   });
 
-  bot.on('end', () => {
+  nextBot.on('end', () => {
+    if (bot !== nextBot) return;
     clearCommandFollow();
+    nextBot.pathfinder?.setGoal(null);
+    bot = null;
     setWorldJoinState('left', 'Minecraft bot disconnected.');
     log('Minecraft bot disconnected.');
-    finishTask('interrupted', 'Minecraft connection ended.');
+    finishTask('blocked', 'Minecraft connection ended before finishing the task.');
     pathState = { status: 'disconnected' };
     publishStatus();
+    scheduleReconnect('disconnect');
   });
 
-  bot.on('goal_reached', () => {
+  nextBot.on('goal_reached', () => {
+    if (bot !== nextBot) return;
     pathState = { ...pathState, status: 'arrived', updatedAt: now() };
     publishStatus();
   });
@@ -760,7 +811,7 @@ function finishTask(status, text, extra = {}) {
 }
 
 function requireBot() {
-  if (!bot?.entity) {
+  if (!isBotConnectedToWorld()) {
     throw new Error('Minecraft bot is not connected to a world yet.');
   }
 }
@@ -786,7 +837,11 @@ function ownerOrBotPosition() {
   return findOwnerOrNearestPlayer()?.player?.entity?.position || bot?.entity?.position || null;
 }
 
-function findKnownBlockNear(blockIds, origin, radius) {
+function blockPositionKey(position) {
+  return `${position.x},${position.y},${position.z}`;
+}
+
+function findKnownBlockNear(blockIds, origin, radius, skippedPositions = new Set()) {
   if (!bot || !origin) return null;
   const blockSet = new Set(blockIds);
   const center = origin.floored ? origin.floored() : origin;
@@ -802,6 +857,7 @@ function findKnownBlockNear(blockIds, origin, radius) {
         const position = center.offset(dx, dy, dz);
         const block = bot.blockAt(position);
         if (!block || !blockSet.has(block.type)) continue;
+        if (skippedPositions.has(blockPositionKey(block.position))) continue;
         const originDistance = origin.distanceTo(block.position);
         const botDistance = bot.entity.position.distanceTo(block.position);
         const score = originDistance + botDistance * 0.15;
@@ -813,6 +869,45 @@ function findKnownBlockNear(blockIds, origin, radius) {
   }
 
   return best?.block || null;
+}
+
+async function collectNearbyDrops(maxDistance = 6, maxItems = 6) {
+  if (!bot?.entity) return 0;
+
+  let collected = 0;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const drops = Object.values(bot.entities)
+      .filter((entity) => entity && entity.name === 'item' && entity.position && (distanceToBot(entity) ?? 9999) <= maxDistance)
+      .map((entity) => ({ entity, distance: distanceToBot(entity) ?? 9999 }))
+      .sort((a, b) => a.distance - b.distance)
+      .slice(0, maxItems);
+
+    if (!drops.length) break;
+
+    for (const { entity } of drops) {
+      if (!bot.entities[entity.id]) continue;
+      pathState = {
+        status: 'collecting',
+        target: {
+          type: 'entity',
+          name: 'item',
+          position: vecToPlain(entity.position),
+          distance: Number((distanceToBot(entity) ?? 0).toFixed(2))
+        },
+        updatedAt: now()
+      };
+      publishStatus();
+      try {
+        await bot.pathfinder.goto(new goals.GoalNear(entity.position.x, entity.position.y, entity.position.z, 1));
+        await wait(300);
+        collected += 1;
+      } catch (error) {
+        log(`Could not collect nearby drop: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  return collected;
 }
 
 function taskIncludes(text, words) {
@@ -1043,7 +1138,9 @@ async function runTask(taskText, taskId, client) {
     finishTask('ok', resultText || `Completed: ${clean}`, typeof result === 'object' && result ? { keepPathState: result.keepPathState } : {});
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const status = /not found|cannot|no .*near|missing|failed|not connected/i.test(message) ? 'blocked' : 'error';
+    const status = /not found|cannot|no .*near|missing|failed|not connected|too long to decide path|unreachable|cannot reach/i.test(message)
+      ? 'blocked'
+      : 'error';
     finishTask(status, message);
   }
 }
@@ -1269,12 +1366,17 @@ async function digBlocks(names, label) {
     throw new Error(`Block ids for ${label} are unavailable in this Minecraft version.`);
   }
 
+  const inventoryBefore = inventoryCount(names);
+  const gameMode = String(bot.game?.gameMode || '').toLowerCase();
+  const skippedPositions = new Set();
+  const maxAttempts = Math.max(config.behavior.maxDigBlocksPerTask * 4, 8);
+  let lastBlocker = '';
   let dug = 0;
-  for (let index = 0; index < config.behavior.maxDigBlocksPerTask; index += 1) {
+  for (let attempt = 0; dug < config.behavior.maxDigBlocksPerTask && attempt < maxAttempts; attempt += 1) {
     const block =
-      findKnownBlockNear(blocks, ownerOrBotPosition(), config.behavior.searchRadius) ||
+      findKnownBlockNear(blocks, ownerOrBotPosition(), config.behavior.searchRadius, skippedPositions) ||
       bot.findBlock({
-        matching: blocks,
+        matching: (candidate) => blocks.includes(candidate.type) && !skippedPositions.has(blockPositionKey(candidate.position)),
         maxDistance: config.behavior.searchRadius
       });
     if (!block) {
@@ -1287,15 +1389,39 @@ async function digBlocks(names, label) {
       updatedAt: now()
     };
     publishStatus();
-    await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1));
+    try {
+      await bot.pathfinder.goto(new goals.GoalNear(block.position.x, block.position.y, block.position.z, 1));
+    } catch (error) {
+      lastBlocker = error instanceof Error ? error.message : String(error);
+      skippedPositions.add(blockPositionKey(block.position));
+      log(`Skipping unreachable ${block.name} at ${blockPositionKey(block.position)}: ${lastBlocker}`);
+      continue;
+    }
     if (!bot.canDigBlock(block)) {
-      throw new Error(`Cannot dig ${block.name} here.`);
+      lastBlocker = `Cannot dig ${block.name} here.`;
+      skippedPositions.add(blockPositionKey(block.position));
+      log(`Skipping undiggable ${block.name} at ${blockPositionKey(block.position)}.`);
+      continue;
     }
     await bot.dig(block);
+    await wait(450);
+    await collectNearbyDrops(5, 4);
     dug += 1;
   }
 
+  await collectNearbyDrops(8, 8);
   publishInventory();
+  if (dug === 0 && lastBlocker) {
+    throw new Error(`Cannot reach nearby ${label}: ${lastBlocker}`);
+  }
+  const inventoryAfter = inventoryCount(names);
+  const collected = inventoryAfter - inventoryBefore;
+  if (dug > 0 && collected <= 0 && gameMode === 'creative') {
+    return `Dug ${dug} ${label} block${dug === 1 ? '' : 's'}, but the bot is in creative mode so no ${label} drops were created.`;
+  }
+  if (dug > 0 && collected > 0) {
+    return `Dug ${dug} ${label} block${dug === 1 ? '' : 's'} and collected ${collected} item${collected === 1 ? '' : 's'}.`;
+  }
   return `Dug ${dug} ${label} block${dug === 1 ? '' : 's'}.`;
 }
 
@@ -1329,6 +1455,8 @@ async function eatFood() {
 }
 
 function stopAll() {
+  shuttingDown = true;
+  clearReconnectTimer();
   if (statusTimer) windowClearInterval(statusTimer);
   clearCommandFollow();
   bridge?.close();

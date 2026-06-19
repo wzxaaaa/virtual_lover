@@ -149,6 +149,7 @@ export interface MinecraftAgentStarterConfig {
   auth: string;
   version: string | false;
   owner: string;
+  ownerEntityId: number | null;
   followDistanceMin: number;
   followDistanceMax: number;
   regroupDistance: number;
@@ -165,6 +166,7 @@ export type MinecraftAgentStarterConfigPatch = Partial<
     | 'auth'
     | 'version'
     | 'owner'
+    | 'ownerEntityId'
     | 'followDistanceMin'
     | 'followDistanceMax'
     | 'regroupDistance'

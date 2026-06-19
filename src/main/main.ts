@@ -95,6 +95,7 @@ type MinecraftAgentStarterConfigJson = {
   };
   behavior?: {
     owner?: unknown;
+    ownerEntityId?: unknown;
     followDistanceMin?: unknown;
     followDistanceMax?: unknown;
     regroupDistance?: unknown;
@@ -137,6 +138,15 @@ function numberFromUnknown(value: unknown, fallback: number, min = Number.MIN_SA
   return Math.max(min, Math.min(max, Math.round(number)));
 }
 
+function positiveIntegerOrNullFromUnknown(value: unknown): number | null {
+  if (value === null || value === undefined || value === '') {
+    return null;
+  }
+
+  const number = numberFromUnknown(value, 0, 1, Number.MAX_SAFE_INTEGER);
+  return number > 0 ? number : null;
+}
+
 function stringFromUnknown(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
 }
@@ -162,6 +172,7 @@ function normalizeMinecraftAgentStarterConfig(raw: MinecraftAgentStarterConfigJs
     auth: stringFromUnknown(raw.minecraft?.auth, 'offline'),
     version,
     owner: stringFromUnknown(raw.behavior?.owner, ''),
+    ownerEntityId: positiveIntegerOrNullFromUnknown(raw.behavior?.ownerEntityId),
     followDistanceMin: numberFromUnknown(raw.behavior?.followDistanceMin, 3, 0, 20),
     followDistanceMax: numberFromUnknown(raw.behavior?.followDistanceMax, 5, 1, 32),
     regroupDistance: numberFromUnknown(raw.behavior?.regroupDistance, 8, 1, 64)
@@ -188,6 +199,7 @@ function applyMinecraftAgentStarterPatch(
     auth: stringFromUnknown(patch.auth, config.auth),
     version,
     owner: stringFromUnknown(patch.owner, config.owner),
+    ownerEntityId: patch.ownerEntityId === undefined ? config.ownerEntityId : positiveIntegerOrNullFromUnknown(patch.ownerEntityId),
     followDistanceMin: numberFromUnknown(patch.followDistanceMin, config.followDistanceMin, 0, 20),
     followDistanceMax: numberFromUnknown(patch.followDistanceMax, config.followDistanceMax, 1, 32),
     regroupDistance: numberFromUnknown(patch.regroupDistance, config.regroupDistance, 1, 64)
@@ -213,6 +225,7 @@ function starterConfigToJson(config: MinecraftAgentStarterConfig, previous: Mine
     behavior: {
       ...(previous.behavior ?? {}),
       owner: config.owner,
+      ownerEntityId: config.ownerEntityId,
       followDistanceMin: config.followDistanceMin,
       followDistanceMax: config.followDistanceMax,
       regroupDistance: config.regroupDistance

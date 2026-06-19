@@ -41,9 +41,11 @@ If a `follow me` task does not move the bot, first check whether the bot can act
 /tp VirtualLoverBot <your Minecraft name>
 ```
 
-When Mineflayer can see the live player entity, `follow me` uses pathfinder `GoalFollow`. Some LAN/offline worlds expose the owner in the in-game player list but do not expose a named player entity to Mineflayer. Use the `debug_entities` bridge frame to inspect raw nearby entities; if the owner appears as an unnamed entity, put its id in `behavior.ownerEntityId`. The starter will then treat that entity as the owner and follow it without repeated teleports.
+When Mineflayer can see the live player entity, `follow me` uses pathfinder `GoalFollow`. Some LAN/offline worlds expose the owner in the in-game player list but do not expose a named player entity to Mineflayer. Use the `debug_entities` bridge frame to inspect raw nearby entities; if the owner appears as an unnamed entity, put its id in `behavior.ownerEntityId` or the app's **Owner Entity ID** field. The starter will then treat that entity as the owner and follow it without repeated teleports.
 
 If no player entity or owner entity id is available, `follow me` starts a conservative command-follow fallback: the bot sends `/tp <bot> <owner>` every `behavior.commandFollowIntervalMs` milliseconds until the player entity becomes visible or you tell it to stop.
+
+Resource tasks such as chopping trees work in Minecraft 1.15.1. If the bot is in creative mode, blocks can be dug but no item drops are created; switch the bot/world to survival when you want inventory collection.
 
 ## Accounts
 

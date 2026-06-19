@@ -60,6 +60,7 @@ type MinecraftAgentStarterConfigForm = Required<
   >
 > & {
   version: string;
+  ownerEntityId: string;
 };
 
 const MC_AGENT_ADMIN_DEFAULT_URL = 'http://localhost:8765';
@@ -72,6 +73,7 @@ const DEFAULT_STARTER_CONFIG_FORM: MinecraftAgentStarterConfigForm = {
   auth: 'offline',
   version: '',
   owner: '',
+  ownerEntityId: '',
   followDistanceMin: 3,
   followDistanceMax: 5,
   regroupDistance: 8
@@ -150,16 +152,23 @@ function starterFormFromInfo(info: MinecraftAgentStarterInfo | null): MinecraftA
     auth: config.auth,
     version: config.version || '',
     owner: config.owner,
+    ownerEntityId: config.ownerEntityId ? String(config.ownerEntityId) : '',
     followDistanceMin: config.followDistanceMin,
     followDistanceMax: config.followDistanceMax,
     regroupDistance: config.regroupDistance
   };
 }
 
+function ownerEntityIdFromForm(value: string): number | null {
+  const number = Number(value.trim());
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
 function starterPatchFromForm(form: MinecraftAgentStarterConfigForm): MinecraftAgentStarterConfigPatch {
   return {
     ...form,
-    version: form.version.trim() || false
+    version: form.version.trim() || false,
+    ownerEntityId: ownerEntityIdFromForm(form.ownerEntityId)
   };
 }
 
@@ -861,6 +870,16 @@ function MinecraftAgentMarketplaceConfig({
             type="text"
             value={starterConfigForm.owner}
             onChange={(event) => updateStarterConfigForm({ owner: event.target.value })}
+          />
+        </label>
+        <label>
+          <span>Owner Entity ID</span>
+          <input
+            min="1"
+            placeholder="319"
+            type="number"
+            value={starterConfigForm.ownerEntityId}
+            onChange={(event) => updateStarterConfigForm({ ownerEntityId: event.target.value })}
           />
         </label>
         <label>
