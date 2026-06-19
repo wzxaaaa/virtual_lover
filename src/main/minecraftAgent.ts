@@ -321,6 +321,8 @@ class MinecraftAgentService {
   private lastTaskFinishedAt = 0;
   private lastInProgressNudgeAt = 0;
   private lastKeepGoingNudgeAt = 0;
+  private lastNudgeKind: MinecraftAgentStatus['lastNudgeKind'] = null;
+  private lastNudgeAt = 0;
   private inventoryWaiters: InventoryWaiter[] = [];
   private dispatchedHistory = new Map<string, string>();
   private seenTaskIdEcho = false;
@@ -361,6 +363,8 @@ class MinecraftAgentService {
     this.lastTaskFinishedAt = 0;
     this.lastInProgressNudgeAt = 0;
     this.lastKeepGoingNudgeAt = 0;
+    this.lastNudgeKind = null;
+    this.lastNudgeAt = 0;
 
     const socket = this.socket;
     this.socket = null;
@@ -393,6 +397,8 @@ class MinecraftAgentService {
       lastScreenshot: this.screenshotCache.at(-1) ?? null,
       lastInventory: { ...this.lastInventory },
       lastInventoryAt: this.lastInventoryAt,
+      lastNudgeKind: this.lastNudgeKind,
+      lastNudgeAt: this.lastNudgeAt,
       lastError: this.lastError
     };
   }
@@ -744,6 +750,8 @@ class MinecraftAgentService {
           } satisfies MinecraftAgentEvent
         );
         this.lastInProgressNudgeAt = now;
+        this.lastNudgeKind = 'in_progress';
+        this.lastNudgeAt = now;
       }
       return;
     }
@@ -768,6 +776,8 @@ class MinecraftAgentService {
         } satisfies MinecraftAgentEvent
       );
       this.lastKeepGoingNudgeAt = now;
+      this.lastNudgeKind = 'keep_going';
+      this.lastNudgeAt = now;
     }
   }
 

@@ -136,6 +136,8 @@ function previewMinecraftAgentStatus(): MinecraftAgentStatus {
     lastScreenshot: null,
     lastInventory: {},
     lastInventoryAt: 0,
+    lastNudgeKind: null,
+    lastNudgeAt: 0,
     lastError: 'Browser preview cannot access Minecraft Agent IPC.'
   };
 }

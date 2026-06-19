@@ -91,6 +91,9 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
   return [
     `Minecraft Agent：${status.connected ? '已连接' : '未连接'}，ws=${status.wsUrl}`,
     status.pendingTask ? `当前任务：${status.pendingTask}` : '当前任务：空闲',
+    status.lastNudgeAt > 0
+      ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleTimeString('zh-CN')}`
+      : '',
     status.lastLog ? `最近反馈：${status.lastLog}` : '',
     inventoryItems ? `背包：${inventoryItems}` : status.lastInventoryAt > 0 ? '背包：空' : '',
     !status.connected ? '提示：还没有连接到她的 Minecraft 身体，需要先启动 mc-agent，并让独立账号进入同一个 LAN 世界。' : ''

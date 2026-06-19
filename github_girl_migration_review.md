@@ -194,8 +194,40 @@
 - `P17` 已补第九段截图预算：按 `github_girl` `service.py` / `plugin.toml` 的 `screenshot_max_edge_px=1024`、`screenshot_jpeg_quality=80`、`screenshot_max_bytes=102400` 思路，主进程收到 mc-agent 截图后会用 Electron `nativeImage` 压成 JPEG，按 1024/512/256 最长边和 80/65/50/40/30 质量阶梯尝试，尽量把单帧控制在 100KB 内再进入 bot 视角缓存和 LLM 多模态上下文；失败时保留原图，不丢掉视觉信息。适配点：`github_girl` 用 Pillow，本项目用 Electron 原生图像能力，避免新增依赖。
 - `P17` 已补第十段自主 nudge loop：按 `github_girl` `GameAgentService._system_prompt_loop` 的 8s in-progress、8s 后 keep-going、10s keep-going 冷却思路，在本项目 `minecraftAgent` 主进程服务里新增系统循环。任务执行超过 8s 会发 `[你正在做事]` cue，要求模型只在有新画面/反馈时讲一句、不要编结果、不要派新任务；任务结束并空闲 8s 后会发 `[你闲下来了]` cue，让模型基于 bot 视角和背包决定是否聊一句或派下一步。适配点：当前项目没有 `push_message ai_behavior="read"` 的 message-plane，所以没有照搬 general read-only 状态注入，避免每 5s 把被动状态变成强制发言；in-progress/keep-going 通过 `minecraft:agentEvent` 的 `nudge` 事件进入已有 `requestGameCompanionNudge(cue)` 多模态链路。
 - `P17` 已补第十一段任务防抖和连接抖动恢复：照抄 `github_girl` `GameAgentService._OVERWRITE_MIN_SURVIVAL_S = 2.0` 的 anti-thrash floor，`overwrite=true` 也不能打断刚下发 2 秒内的新任务，防止模型连续工具调用把 mc-agent 在多个目标之间来回打断；同步更新工具 schema 和 LLM 规则，要求只在用户明确纠正/停止/改目标或观察到卡住时 overwrite。另按 `github_girl` `_on_log("Connection lost and re-established.")` 的语义，WebSocket 非预期断开时立即把当前 pending task 标记为 interrupted/丢失，并释放 busy 状态、唤醒前端，而不是等 120s 超时。适配点：本项目没有 agent 日志层的固定重连文本，所以挂在 Electron WebSocket `onclose` 上承接同等语义。
+- `P17` 已补第十二段自主循环可观测性：`MinecraftAgentStatus` 增加 `lastNudgeKind/lastNudgeAt`，主进程每次发 in-progress / keep-going nudge 都会记录；市场 Minecraft Agent 配置页显示“自主：执行中观察/空闲续玩 + 时间”，LLM 的 Minecraft bot 视角上下文也带入最近自主判断时间。这样用户问“她为什么没继续动/她有没有自己判断”时，不再只能靠最近日志猜。
 
-当前进度估算：整体迁移约 62%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 69%。
+当前进度估算：整体迁移约 62%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 70%。
+
+## Agent / Minecraft 剩余缺口
+
+### Agent 整体还差什么
+
+1. **独立 Agent 服务与事件总线（G01）**：当前 Agent 仍主要压在 Electron 主进程和 renderer 调度里；`github_girl` 是主服务/记忆服务/Agent 服务分离，并通过事件总线传任务状态。后续要把任务执行、工具调用、状态推送拆成独立服务，减少主进程复杂度。
+2. **任务系统完整化（G02）**：当前已有工具注册、任务快照和 Minecraft pending 保护，但还没有 `github_girl` 级别的全局任务去重、纠错、中断、重试、恢复队列。需要统一所有电脑控制、浏览器控制、游戏控制的 task_id、dedupe、cancel、retry。
+3. **message-plane / push_message 语义（L04/G01）**：当前没有 `push_message ai_behavior="read/respond"`、priority、coalesce、visibility 这一层，所以很多 `github_girl` 的被动上下文注入只能用主动 `agentTurn` 适配。要完整迁入，必须补统一消息平面。
+4. **Computer Use / Browser Use 适配器（G03/G04）**：当前电脑控制还偏“提出动作 + Electron 执行”；`github_girl` 有更系统的视觉动作循环、浏览器任务适配、外部执行器适配。需要把桌面/浏览器自动化也纳入同一 Agent 任务系统。
+5. **外部 Agent 后端兼容（G05/G06）**：OpenClaw/QwenPaw/OpenFang 这类外部执行后端还没接，后续可让复杂任务交给专用 agent，而不是全部塞进主模型。
+6. **Agent HUD（G07）**：当前状态散落在聊天、市场和设置里；还缺桌面级任务 HUD，持续显示当前任务、步骤、取消/纠错入口。
+7. **MCP/Skill 生命周期**：现在已有市场和内置工具概念，但还不是完整的 MCP/Skill 运行时：安装、卸载、权限、配置 schema、版本、隔离进程、工具发现、日志、健康检查都要补。
+8. **测试和回放**：缺可重复的 agent 任务回放、模拟工具返回、端到端视觉测试；现在主要靠手动试和 TypeScript/build 验证。
+
+### Minecraft 还差什么
+
+1. **mc-agent 外部身体仍需用户下载运行**：当前应用负责对话、视觉、任务下发；真正进 Minecraft 控制第二账号的是外部 mc-agent。还没有把 mineflayer/mc-agent 源码、二进制、版本管理和自动启动完整打包进本项目。
+2. **message-plane 未补导致 general read-only 状态注入没原样迁**：`github_girl` 能把日志/截图作为 `read` 上下文静默塞给模型；本项目目前只迁了任务完成、危险、执行中、空闲续玩这些会触发判断的 cue。要原样迁，需要先补 message-plane。
+3. **更丰富的游戏状态**：当前可靠 ground truth 主要是连接、任务、日志、截图、背包；血量、饥饿、坐标、维度、装备、附近实体、方块目标、路径状态等要等 mc-agent 协议明确输出后才能缓存入模。
+4. **长期目标规划**：现在可以下发单步/短链任务并根据反馈继续；还缺“建房子/长线挖矿/跟随探索”这种多阶段 plan、checkpoint、失败恢复和资源预算。
+5. **多玩家协作语义**：她能作为第二玩家进同一个 LAN 世界，但还缺“用户位置/朝向/距离/跟随半径/别挡路/分工采集/共享箱子”等协作规则。
+6. **游戏内自然沟通**：当前主要通过桌面语音/聊天说话；还缺让 bot 在 MC 聊天里发短句、看用户游戏内聊天、把游戏内事件和桌面对话合并。
+7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。
+8. **E2E 测试环境**：缺一个模拟 mc-agent 或本地测试服务器，自动验证 task/query_inventory/screenshot/task_finished/断线/迟到包/overwrite 防抖。
+
+### 下一步建议顺序
+
+1. 先补 **Minecraft E2E 模拟器/测试**，把目前 99% 的项目内闭环锁住，防止后面改 Agent 大架构时打爆。
+2. 再补 **mc-agent richer status 协议适配**，如果外部 agent 能吐血量/坐标/维度/装备，就把这些入模。
+3. 然后做 **全局 message-plane**，让 Minecraft 和其他 Agent 能共享 `read/respond`、priority、coalesce。
+4. 最后再拆 **独立 Agent 服务 + 任务系统**，这是大工程，应该在 Minecraft 核心稳定后动。
 
 ## 文件域审阅摘要
 

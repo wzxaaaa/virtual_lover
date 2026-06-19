@@ -317,6 +317,8 @@ export interface MinecraftAgentStatus {
   lastScreenshot: MinecraftAgentScreenshot | null;
   lastInventory: Record<string, number>;
   lastInventoryAt: number;
+  lastNudgeKind: MinecraftAgentNudge['kind'] | null;
+  lastNudgeAt: number;
   lastError: string | null;
 }
 

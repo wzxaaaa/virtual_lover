@@ -156,6 +156,10 @@ function MinecraftAgentMarketplaceConfig({
   const shownWsUrl = agentStatus?.wsUrl || config.agent.minecraftAgentWsUrl;
   const pendingTask = agentStatus?.pendingTask || '空闲';
   const lastError = agentStatus?.lastError || '';
+  const lastNudge =
+    agentStatus?.lastNudgeAt && agentStatus.lastNudgeKind
+      ? `${agentStatus.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'} ${new Date(agentStatus.lastNudgeAt).toLocaleTimeString('zh-CN')}`
+      : '暂无';
   const adminUrl = config.agent.minecraftAgentAdminUrl || MC_AGENT_ADMIN_DEFAULT_URL;
 
   const openAdminPanel = (): void => {
@@ -208,6 +212,8 @@ function MinecraftAgentMarketplaceConfig({
           <strong>{pendingTask}</strong>
           <span>日志</span>
           <strong>{agentStatus?.lastLog || '暂无'}</strong>
+          <span>自主</span>
+          <strong>{lastNudge}</strong>
         </div>
         {lastError ? <div className="minecraft-agent-error">{lastError}</div> : null}
       </div>

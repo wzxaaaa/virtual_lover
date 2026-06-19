@@ -259,6 +259,9 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
     'Minecraft bot 视角：这是她在游戏里的身体状态，不是用户桌面。',
     `连接：${status.connected ? '已连接' : '未连接'}；当前任务：${status.pendingTask || '空闲'}`,
     status.lastLog ? `最近游戏反馈：${status.lastLog}` : '',
+    status.lastNudgeAt > 0
+      ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleString('zh-CN')}。`
+      : '最近自主判断：暂无。',
     status.lastInventoryAt > 0 ? `当前背包：${formatMinecraftInventory(status.lastInventory)}` : '当前背包：暂无真实数据',
     status.lastScreenshot
       ? includesImage
