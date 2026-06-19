@@ -5,6 +5,7 @@ export type MinecraftPluginTextIntent =
   | {
       type: 'task';
       task: string;
+      goal: string;
       overwrite: boolean;
     }
   | {
@@ -109,6 +110,7 @@ export function formatMinecraftAgentStatus(status?: MinecraftAgentStatus | null)
 
   return [
     `Minecraft Agent：${status.connected ? '已连接' : '未连接'}，ws=${status.wsUrl}`,
+    status.activeGoal ? `当前目标：${status.activeGoal}` : '',
     status.pendingTask ? `当前任务：${status.pendingTask}` : '当前任务：空闲',
     status.lastNudgeAt > 0
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleTimeString('zh-CN')}`
@@ -207,6 +209,7 @@ export function getMinecraftPluginTextIntent(text: string, gameCompanionEnabled:
   return {
     type: 'task',
     task,
+    goal: cleanText.slice(0, 300),
     overwrite: /重新|覆盖|打断|直接|现在|立刻|马上|先停|取消|中断|stop|overwrite/i.test(cleanText)
   };
 }

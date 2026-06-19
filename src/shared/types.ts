@@ -334,6 +334,8 @@ export interface MinecraftAgentStatus {
   running: boolean;
   connected: boolean;
   taskFinished: boolean;
+  activeGoal: string | null;
+  activeGoalUpdatedAt: number;
   pendingTask: string | null;
   pendingTaskId: string | null;
   logCacheSize: number;
@@ -350,6 +352,7 @@ export interface MinecraftAgentStatus {
 
 export interface MinecraftAgentTaskRequest {
   task: string;
+  goal?: string;
   overwrite?: boolean;
   timeoutMs?: number;
 }

@@ -198,8 +198,9 @@
 - `P17` 已补第十三段 mc-agent 协议 smoke：按 `github_girl` `smoke_local.py` / `README.md` 的目标，新增 `scripts/smoke-minecraft-agent.mjs`、`npm run smoke:minecraft-agent` 和 `npm run smoke:minecraft-agent:mock`。真实模式会连 `ws://localhost:48909`（可用 `MC_AGENT_WS` / `--ws` 改），发送 `query_inventory`，再发送带 `task_id` 的 `task` 帧，等待匹配的 `task_finished`，统计 `log/screenshot/inventory/agent_status/alert`，可用 `--dump-dir` 保存截图；mock 模式内置最小 WebSocket mc-agent，不依赖真实游戏也能验证 inventory/screenshot/task_finished/task_id echo。适配点：`github_girl` 直接实例化 Python `GameAgentService` 并假装 push_message；本项目主逻辑绑定 Electron main/nativeImage，不适合在普通 Node 里直接实例化，所以先做 Node 版真实/模拟 WebSocket 协议 smoke，后续再补 Electron 内部服务级 smoke。
 - `P17` 已补第十四段 task_id 迟到包 smoke：继续按 `github_girl` `game_agent_minecraft` 测试里的“任务完成必须匹配当前 task_id”语义，`scripts/smoke-minecraft-agent.mjs` 新增 `--scenario stale-task-id`，mock mc-agent 会先发一个错误 `task_id` 的 `task_finished`，再发正确 `task_id` 的完成包；脚本会记录并忽略错误完成包，只有当前任务的完成包能通过。新增 `npm run smoke:minecraft-agent:mock:stale` 作为快捷入口。适配点：这仍是 WebSocket 协议级 smoke，用来锁住 task_id 串线问题；Electron 主进程内的 overwrite/busy 防抖服务级 smoke 还需要后续单独补。
 - `P17` 已补第十五段 richer status 入模：按 `github_girl` game agent “状态进入服务上下文”的方向，`agent_status` 帧现在会宽松解析 `position/pos/location`、`health/hp`、`food/hunger`、`dimension/world`、`biome`、`gameMode`、`selectedItem/heldItem`、`equipment`、`nearbyEntities` 等字段，缓存为 `MinecraftAgentWorldState` 并进入 `MinecraftAgentStatus`、工具状态回复、游戏陪玩 prompt 和 LLM 的 Minecraft bot 视角上下文。适配点：外部 mc-agent 当前字段规范还不固定，所以本项目先做多字段兼容解析；如果后续 mc-agent 明确血量、坐标、附近实体协议，再把 schema 收紧。
+- `P17` 已补第十六段长目标状态：在 `MinecraftAgentStatus` 中新增 `activeGoal/activeGoalUpdatedAt`，文本直达 Minecraft 任务会把用户原话作为这一局当前目标，LLM 工具调用也可传 `goal`；停止/取消类任务会清空目标。空闲续玩 nudge、Minecraft bot 视角 prompt、状态工具、市场 Minecraft 配置和前端状态回复都会带入该目标，让“建房子/长线挖矿/跟随探索”不再只靠最近一条 task 猜。适配点：这只是目标记忆和续玩约束，还不是完整 plan/checkpoint/失败恢复系统。
 
-当前进度估算：整体迁移约 64%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 75%。
+当前进度估算：整体迁移约 64%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99%，完整游戏 Agent 自主玩法约 76%。
 
 ## Agent / Minecraft 剩余缺口
 
@@ -219,7 +220,7 @@
 1. **mc-agent 外部身体仍需用户下载运行**：当前应用负责对话、视觉、任务下发；真正进 Minecraft 控制第二账号的是外部 mc-agent。还没有把 mineflayer/mc-agent 源码、二进制、版本管理和自动启动完整打包进本项目。
 2. **message-plane 未补导致 general read-only 状态注入没原样迁**：`github_girl` 能把日志/截图作为 `read` 上下文静默塞给模型；本项目目前只迁了任务完成、危险、执行中、空闲续玩这些会触发判断的 cue。要原样迁，需要先补 message-plane。
 3. **更丰富的游戏状态**：已能接住并入模血量、饥饿、坐标、维度、生物群系、装备、手持物、附近实体等常见 `agent_status` 字段；还缺方块目标、路径状态、危险等级、用户位置/朝向等更细的协作 ground truth，需等 mc-agent 协议明确输出。
-4. **长期目标规划**：现在可以下发单步/短链任务并根据反馈继续；还缺“建房子/长线挖矿/跟随探索”这种多阶段 plan、checkpoint、失败恢复和资源预算。
+4. **长期目标规划**：已有 `activeGoal` 保存这一局持续目标，并进入空闲续玩判断；还缺真正的多阶段 plan、checkpoint、失败恢复和资源预算。
 5. **多玩家协作语义**：她能作为第二玩家进同一个 LAN 世界，但还缺“用户位置/朝向/距离/跟随半径/别挡路/分工采集/共享箱子”等协作规则。
 6. **游戏内自然沟通**：当前主要通过桌面语音/聊天说话；还缺让 bot 在 MC 聊天里发短句、看用户游戏内聊天、把游戏内事件和桌面对话合并。
 7. **启动与连接自动化**：市场里有下载、路径和管理面板入口，但还不能自动识别 Minecraft LAN 端口、自动填 mc-agent 配置、自动确认 bot 已进世界。

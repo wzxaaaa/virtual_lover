@@ -240,11 +240,12 @@ function formatMinecraftStatusReply(result: AgentToolResult): string {
     .slice(0, 6)
     .map(([name, count]) => `${name}×${count}`)
     .join('、');
+  const goalLine = status.activeGoal ? `这一局我记着：${status.activeGoal}` : '';
   const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
   const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
   const worldLine = formatMinecraftWorldStateReply(status);
   const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
-  return [taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
+  return [goalLine, taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
 }
 
 function formatMinecraftTaskReply(result: AgentToolResult): string {
@@ -361,11 +362,12 @@ function formatMinecraftStatusReplyLegacy(result: AgentToolResult): string {
     .slice(0, 6)
     .map(([name, count]) => `${name}×${count}`)
     .join('、');
+  const goalLine = status.activeGoal ? `这一局我记着：${status.activeGoal}` : '';
   const taskLine = status.pendingTask ? `我正在做：${status.pendingTask}` : '我现在空着，可以接下一步。';
   const logLine = status.lastLog ? `刚才反馈：${status.lastLog}` : '';
   const worldLine = formatMinecraftWorldStateReply(status);
   const bagLine = inventoryItems ? `背包里主要有：${inventoryItems}` : '';
-  return [taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
+  return [goalLine, taskLine, logLine, worldLine, bagLine].filter(Boolean).join('\n');
 }
 
 function formatMinecraftTaskReplyLegacy(result: AgentToolResult): string {
@@ -4000,7 +4002,12 @@ export function App(): ReactElement {
           ? '没有用户屏幕摘要，本轮只参考她在 Minecraft 里的身体状态。'
           : 'mc-agent 未连接，还没有她在 Minecraft 里的身体画面。',
       visibleApp: 'Minecraft',
-      userActivity: status?.pendingTask ? `她正在执行：${status.pendingTask}` : '她当前空闲或尚未进入世界。',
+      userActivity: [
+        status?.activeGoal ? `当前目标：${status.activeGoal}` : '',
+        status?.pendingTask ? `她正在执行：${status.pendingTask}` : '她当前空闲或尚未进入世界。'
+      ]
+        .filter(Boolean)
+        .join('；'),
       nextFocus: status?.connected ? '根据她的身体视角和任务状态判断是否继续下一步。' : '先引导用户启动 mc-agent 并让独立账号进入同一个 LAN 世界。',
       sensitive: false
     };
@@ -4244,6 +4251,7 @@ export function App(): ReactElement {
           toolId: 'plugin.minecraft_task',
           input: {
             task: intent.task,
+            goal: intent.goal,
             overwrite: intent.overwrite
           }
         });

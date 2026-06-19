@@ -128,6 +128,8 @@ function previewMinecraftAgentStatus(): MinecraftAgentStatus {
     running: false,
     connected: false,
     taskFinished: true,
+    activeGoal: null,
+    activeGoalUpdatedAt: 0,
     pendingTask: null,
     pendingTaskId: null,
     logCacheSize: 0,

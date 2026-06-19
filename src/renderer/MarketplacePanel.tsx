@@ -154,6 +154,7 @@ function MinecraftAgentMarketplaceConfig({
   const statusTone = statusLoading && !agentStatus ? 'checking' : agentStatus?.connected ? 'connected' : 'disconnected';
   const statusLabel = statusTone === 'connected' ? 'mc-agent 已连接' : statusTone === 'checking' ? '检查中' : 'mc-agent 未连接';
   const shownWsUrl = agentStatus?.wsUrl || config.agent.minecraftAgentWsUrl;
+  const activeGoal = agentStatus?.activeGoal || '暂无';
   const pendingTask = agentStatus?.pendingTask || '空闲';
   const lastError = agentStatus?.lastError || '';
   const lastNudge =
@@ -208,6 +209,8 @@ function MinecraftAgentMarketplaceConfig({
         <div className="minecraft-agent-status-grid">
           <span>WS</span>
           <strong>{shownWsUrl}</strong>
+          <span>目标</span>
+          <strong>{activeGoal}</strong>
           <span>任务</span>
           <strong>{pendingTask}</strong>
           <span>日志</span>

@@ -284,6 +284,7 @@ function formatMinecraftContext(request: AgentTurnRequest, includesImage: boolea
   return [
     'Minecraft bot 视角：这是她在游戏里的身体状态，不是用户桌面。',
     `连接：${status.connected ? '已连接' : '未连接'}；当前任务：${status.pendingTask || '空闲'}`,
+    status.activeGoal ? `这一局当前目标：${status.activeGoal}` : '这一局当前目标：暂无。',
     status.lastLog ? `最近游戏反馈：${status.lastLog}` : '',
     status.lastNudgeAt > 0
       ? `最近自主判断：${status.lastNudgeKind === 'in_progress' ? '执行中观察' : '空闲续玩'}，${new Date(status.lastNudgeAt).toLocaleString('zh-CN')}。`
@@ -336,7 +337,7 @@ function minecraftToolPrompt(config: AppConfig): string {
   }
 
   return `Minecraft MCP 工具：
-- plugin.minecraft_task：当你要让游戏角色执行一个具体动作时调用。input: { "task": "one concrete executable Minecraft goal in English", "overwrite": false }。这是后台派发，用户不会直接看到工具名。
+- plugin.minecraft_task：当你要让游戏角色执行一个具体动作时调用。input: { "task": "one concrete executable Minecraft goal in English", "goal": "optional player-facing current goal", "overwrite": false }。这是后台派发，用户不会直接看到工具名。
 - plugin.query_inventory：当用户问背包/物品，或你需要真实库存才能回答时调用。input: {}。
 - plugin.game_agent_status：当用户问当前游戏代理/任务状态，或你需要知道是否空闲时调用。input: {}。
 
@@ -344,8 +345,9 @@ Minecraft 工具规则：
 1. 只有在确实需要游戏角色行动或查询真实库存/状态时才写 toolCalls。
 2. 如果正在执行上一个 Minecraft 动作，不要派新 minecraft_task，除非用户明确要求打断/覆盖，或你直接观察到当前动作已经卡住且持续没有进展。
 3. task 必须具体、可执行、短，不要写抽象愿望；优先英文，例如 "collect wood by chopping nearby trees, then stop somewhere safe"。
-4. overwrite 只用于“停下/别做/换成/改去/过来”等明确纠正；不要因为你想到更优路线就覆盖。刚下发不到 2 秒的新任务会被保护，别连续刷覆盖。
-5. reply 给用户听时不要说“工具”“tool”“minecraft_task”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
+4. goal 用来描述这一局持续追的目标，可以直接用用户原话或短中文总结；如果只是查状态/背包，不要写 goal。
+5. overwrite 只用于“停下/别做/换成/改去/过来”等明确纠正；不要因为你想到更优路线就覆盖。刚下发不到 2 秒的新任务会被保护，别连续刷覆盖。
+6. reply 给用户听时不要说“工具”“tool”“minecraft_task”“连接”“系统”等内部词；像正在一起玩游戏的人。`;
 }
 
 function systemPrompt(config: AppConfig): string {
@@ -516,6 +518,7 @@ function normalizeToolInput(toolId: string, rawInput: unknown, rawCall: Record<s
 
     return {
       task: task.slice(0, 500),
+      goal: typeof input.goal === 'string' && input.goal.trim() ? input.goal.trim().slice(0, 300) : undefined,
       overwrite: input.overwrite === true
     };
   }

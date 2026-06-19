@@ -146,6 +146,28 @@ function keepGoingNudgeCue(inventory: Record<string, number>, lastInventoryAt: n
     .join('\n');
 }
 
+function keepGoingNudgeCueWithGoal(inventory: Record<string, number>, lastInventoryAt: number, activeGoal: string | null): string {
+  return [
+    keepGoingNudgeCue(inventory, lastInventoryAt),
+    activeGoal ? `这一局当前目标：${activeGoal.slice(0, 220)}。如果继续行动，必须服务于这个目标；如果目标已经完成或明显不合适，就先用一句自然的话向用户确认，不要硬派新动作。` : ''
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+function shouldClearActiveGoal(taskText: string): boolean {
+  return /stop|wait safely|cancel|abort|interrupt|halt|别做|停下|停止|取消|中断|先停|别动/i.test(taskText);
+}
+
+function normalizeActiveGoal(goal: unknown, taskText: string): string | null {
+  const rawGoal = typeof goal === 'string' && goal.trim() ? goal.trim() : taskText.trim();
+  if (!rawGoal || shouldClearActiveGoal(rawGoal) || shouldClearActiveGoal(taskText)) {
+    return null;
+  }
+
+  return rawGoal.slice(0, 300);
+}
+
 function normalizeInventory(value: unknown): Record<string, number> | null {
   if (!isRecord(value)) {
     return null;
@@ -523,6 +545,8 @@ class MinecraftAgentService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private systemLoopTimer: ReturnType<typeof setInterval> | null = null;
   private pendingTask: PendingTask | null = null;
+  private activeGoal: string | null = null;
+  private activeGoalUpdatedAt = 0;
   private logCache: string[] = [];
   private screenshotCache: MinecraftAgentScreenshot[] = [];
   private lastInventory: Record<string, number> = {};
@@ -576,6 +600,8 @@ class MinecraftAgentService {
     this.lastKeepGoingNudgeAt = 0;
     this.lastNudgeKind = null;
     this.lastNudgeAt = 0;
+    this.activeGoal = null;
+    this.activeGoalUpdatedAt = 0;
     this.worldState = null;
 
     const socket = this.socket;
@@ -601,6 +627,8 @@ class MinecraftAgentService {
       running: this.running,
       connected: this.connected,
       taskFinished: this.pendingTask === null,
+      activeGoal: this.activeGoal,
+      activeGoalUpdatedAt: this.activeGoalUpdatedAt,
       pendingTask: this.pendingTask?.taskText ?? null,
       pendingTaskId: this.pendingTask?.taskId ?? null,
       logCacheSize: this.logCache.length,
@@ -675,6 +703,7 @@ class MinecraftAgentService {
           error: 'WebSocket send failed.'
         });
       } else {
+        this.updateActiveGoalFromRequest(request, taskText);
         this.emitStatus();
       }
     });
@@ -740,6 +769,7 @@ class MinecraftAgentService {
       return result;
     }
 
+    this.updateActiveGoalFromRequest(request, taskText);
     const result: MinecraftAgentTaskResult = {
       ok: true,
       status: 'dispatched',
@@ -842,6 +872,16 @@ class MinecraftAgentService {
       this.rememberDispatchedTask(taskId, taskText);
     }
     return sent;
+  }
+
+  private updateActiveGoalFromRequest(request: MinecraftAgentTaskRequest, taskText: string): void {
+    const nextGoal = normalizeActiveGoal(request.goal, taskText);
+    if (nextGoal === this.activeGoal) {
+      return;
+    }
+
+    this.activeGoal = nextGoal;
+    this.activeGoalUpdatedAt = nextGoal ? Date.now() : 0;
   }
 
   private rememberDispatchedTask(taskId: string, taskText: string): void {
@@ -982,7 +1022,7 @@ class MinecraftAgentService {
           type: 'nudge',
           nudge: {
             kind: 'keep_going',
-            cue: keepGoingNudgeCue(this.lastInventory, this.lastInventoryAt),
+            cue: keepGoingNudgeCueWithGoal(this.lastInventory, this.lastInventoryAt, this.activeGoal),
             createdAt: now,
             priority: 3
           }

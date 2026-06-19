@@ -180,6 +180,7 @@ registerAgentTool(
     inputSchema: schema(
       {
         task: { type: 'string', description: 'One concrete executable Minecraft goal in English.' },
+        goal: { type: 'string', description: 'Optional longer player-facing goal this task serves.' },
         overwrite: {
           type: 'boolean',
           description:
@@ -200,6 +201,7 @@ registerAgentTool(
 
     const result = await dispatchMinecraftAgentTask(context.config, {
       task: input.task,
+      goal: typeof input.goal === 'string' ? input.goal : undefined,
       overwrite: input.overwrite === true
     });
 
