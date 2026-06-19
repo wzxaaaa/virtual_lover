@@ -502,14 +502,17 @@ function finishTask(status, text, extra = {}) {
   if (!currentTask) return;
   const task = currentTask;
   currentTask = null;
-  pathState = { ...pathState, status: status === 'ok' ? 'idle' : status, updatedAt: now() };
+  const { keepPathState = false, ...frameExtra } = extra;
+  if (!keepPathState) {
+    pathState = { ...pathState, status: status === 'ok' ? 'idle' : status, updatedAt: now() };
+  }
   broadcast({
     type: 'task_finished',
     status,
     text,
     task_id: task.id,
     inventory: inventorySnapshot(),
-    ...extra
+    ...frameExtra
   });
   publishStatus();
 }
@@ -531,6 +534,21 @@ function nearestHostile(maxDistance = 8) {
 function taskIncludes(text, words) {
   const lower = text.toLowerCase();
   return words.some((word) => lower.includes(word));
+}
+
+function shouldStopTask(text) {
+  const lower = text.toLowerCase();
+  return [
+    /\bstop\b/,
+    /\bcancel\b/,
+    /\bwait here\b/,
+    /\bstay here\b/,
+    /\bhold position\b/,
+    /\bstand still\b/,
+    /\bstop moving\b/,
+    /\bstop following\b/,
+    /\bidle\b/
+  ].some((pattern) => pattern.test(lower));
 }
 
 async function runTask(taskText, taskId, client) {
@@ -555,8 +573,9 @@ async function runTask(taskText, taskId, client) {
 
   try {
     requireBot();
-    const resultText = await executeTask(clean);
-    finishTask('ok', resultText || `Completed: ${clean}`);
+    const result = await executeTask(clean);
+    const resultText = typeof result === 'string' ? result : result?.text;
+    finishTask('ok', resultText || `Completed: ${clean}`, typeof result === 'object' && result ? { keepPathState: result.keepPathState } : {});
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     const status = /not found|cannot|no .*near|missing|failed|not connected/i.test(message) ? 'blocked' : 'error';
@@ -571,7 +590,7 @@ function cryptoRandomId() {
 async function executeTask(text) {
   const lower = text.toLowerCase();
 
-  if (taskIncludes(lower, ['stop', 'cancel', 'wait', 'stay', 'hold position'])) {
+  if (shouldStopTask(lower)) {
     bot.pathfinder.setGoal(null);
     bot.clearControlStates();
     pathState = { status: 'idle', updatedAt: now() };
@@ -644,7 +663,7 @@ async function followPlayer() {
   };
   bot.pathfinder.setGoal(new goals.GoalFollow(target.player.entity, followDistance), true);
   publishStatus();
-  return `Started following ${target.name}.`;
+  return { text: `Started following ${target.name}.`, keepPathState: true };
 }
 
 async function goNearPlayer() {

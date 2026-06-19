@@ -216,8 +216,9 @@
 - `P17` 已补第三十一段应用内联机验证入口：继续照 `github_girl` quickstart “刷新状态/看黑窗口最后几行”的排错方式，但把用户要手动串起来的检查变成市场配置页里的“验证联机”。该动作会刷新 `MinecraftAgentStatus`、读取 `joinState`、在 mc-agent bridge 已连上时发起 live `query_inventory`，最后把“第二账号阶段 + bot/host/port/维度/坐标 + live 背包是否可读 + 下一步建议”写回配置页消息区。`scripts/smoke-minecraft-agent.mjs` 同步增强 `worldJoin` 摘要输出，并新增 `npm run smoke:minecraft-agent:status` 用于真实 starter 运行时只做状态/进服/背包轻量回放，不派任务。适配点：这仍不是自动打开 Minecraft 或自动进 LAN 世界；真实世界里的跟随/砍树/聊天还需要用户实际开 MC 后跑联机回放验证。
 - `P17` 已补第三十二段安全动作回放入口：继续沿 `github_girl` quickstart 第 5/6 步“先确认 bot joined，再跟 neko-chan 说话/让她行动”的顺序，市场 Minecraft Agent 配置页新增“安全回放”。该动作会先刷新 `joinState`，只有第二账号已确认在世界里才发送 `stop and wait safely`，等待 `task_finished` 后再读 live 背包和最新状态，把结果写回消息区；未进服时只提示下一步排查，不会盲目派任务。根脚本新增 `npm run smoke:minecraft-agent:safe`，用于真实 starter 已连上时在命令行跑同样的低风险回放。适配点：这还是保守动作，不代表复杂任务已经经过真实 LAN 压测；下一步才应该在用户实际 Minecraft 世界里验证跟随、聊天、挖木头和危险处理。
 - `P17` 已补第三十三段真实联机跟随诊断：实机联机发现 `follow me` 在 bot 与用户距离过远、Owner 未填准或玩家实体未加载时会返回 “No owner or nearby player found”，用户看起来像是“她不动”。本轮把内置 starter 的 Owner 匹配改为大小写不敏感，`agent_status` 新增 `knownPlayers` 和玩家 `visible` 标记；`follow/regroup` 失败时会返回当前 Owner、可见玩家、已知在线玩家、bot 坐标和 `/tp VirtualLoverBot <玩家名>` 建议。主进程和 renderer 同步接住 `knownPlayers`，状态回复会区分“附近玩家”和“在线但不在视野”。适配点：mineflayer 仍然只能对已加载的玩家实体寻路，无法凭一个远处用户名自动知道坐标；首次会合仍需要用户走近、传送或让 bot 在同一加载区域内看到用户。
+- `P17` 已补第三十四段跟随意图解析修复：实机发现模型会下发 “follow the player at a safe 3 to 5 block distance, stay out of the player's path”，旧版 starter 因为用简单 `includes("stay")` 把 `stay out` 误判成停止，导致用户说“跟着我”后回包却是 `Stopped and waiting`。本轮新增精确停止意图匹配，只匹配 `stop/cancel/wait here/stay here/hold position/stand still/stop following` 等明确停止语义；`stay out of the player's path` 不再触发 stop。同时 `followPlayer()` 成功后保留 `pathState.status="following"`，不再被 `task_finished` 的 ok 分支立刻重置成 idle。适配点：如果 bot 仍看不到 Owner/玩家实体，follow 会返回第三十三段的目标诊断，而不是假装开始移动。
 
-当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.75%，完整游戏 Agent 自主玩法约 95%。
+当前进度估算：整体迁移约 70%；核心桌宠/Live2D 体验约 73%；屏幕/摄像头视觉链路约 76%；Minecraft P17 当前项目内闭环约 99.8%，完整游戏 Agent 自主玩法约 95%。
 
 ## Agent / Minecraft 剩余缺口
 
