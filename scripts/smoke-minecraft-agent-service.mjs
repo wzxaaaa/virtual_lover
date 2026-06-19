@@ -278,12 +278,27 @@ class MockMinecraftAgent {
             'nearby_players',
             'path_state',
             'danger_state',
+            'world_join_state',
             'game_chat',
             'shared_containers',
             'block_interaction'
           ]
         });
-        this.send({ type: 'agent_status', connected: true, mock: true, position: { x: 0, y: 64, z: 0 } });
+        this.send({
+          type: 'agent_status',
+          connected: true,
+          mock: true,
+          username: 'SmokeBot',
+          worldJoin: {
+            phase: 'joined',
+            connectedToWorld: true,
+            username: 'SmokeBot',
+            host: '127.0.0.1',
+            port: 55916,
+            dimension: 'overworld'
+          },
+          position: { x: 0, y: 64, z: 0 }
+        });
       }
 
       const decoded = decodeClientFrames(pending);
@@ -371,6 +386,9 @@ async function main() {
     );
     assert(protocolEvent.protocol.missingCapabilities.length === 0, 'mock protocol should satisfy all required capabilities');
     assert(service.getStatus().protocol?.capabilities.includes('shared_containers'), 'status should expose declared shared container capability');
+    assert(service.getStatus().protocol?.capabilities.includes('world_join_state'), 'status should expose world join capability');
+    assert(service.getStatus().joinState.phase === 'joined', 'status should expose joined Minecraft world state');
+    assert(service.getStatus().joinState.username === 'SmokeBot', 'join state should expose bot username');
 
     const first = await service.dispatchTask(config, { task: 'first long task', goal: 'service smoke', timeoutMs: 30000 });
     assert(first.status === 'dispatched' && first.taskId, 'first task should be dispatched');

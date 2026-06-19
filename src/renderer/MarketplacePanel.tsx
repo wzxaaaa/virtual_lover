@@ -25,6 +25,7 @@ import type {
   MinecraftAgentStarterInfo,
   MinecraftAgentStarterProcessAction,
   MinecraftAgentStarterProcessState,
+  MinecraftAgentJoinState,
   MinecraftAgentStatus
 } from '../shared/types';
 import { openExternalUrl } from './openExternal';
@@ -184,6 +185,65 @@ function detectMinecraftLanPort(text: string): number | null {
   }
 
   return null;
+}
+
+function minecraftJoinTone(joinState: MinecraftAgentJoinState | null | undefined): 'connected' | 'checking' | 'disconnected' {
+  if (!joinState) {
+    return 'checking';
+  }
+  if (joinState.phase === 'joined') {
+    return 'connected';
+  }
+  if (joinState.phase === 'joining' || joinState.phase === 'unknown') {
+    return 'checking';
+  }
+  return 'disconnected';
+}
+
+function minecraftJoinLabel(joinState: MinecraftAgentJoinState | null | undefined): string {
+  if (!joinState) {
+    return '等待进服状态';
+  }
+  if (joinState.phase === 'joined') {
+    return '第二账号已进服';
+  }
+  if (joinState.phase === 'joining') {
+    return '第二账号正在进服';
+  }
+  if (joinState.phase === 'agent_disconnected') {
+    return 'Agent 未连接';
+  }
+  if (joinState.phase === 'left') {
+    return '第二账号已离开';
+  }
+  if (joinState.phase === 'rejected') {
+    return '第二账号被拒绝';
+  }
+  if (joinState.phase === 'error') {
+    return '第二账号进服异常';
+  }
+  return '等待进服状态';
+}
+
+function minecraftJoinDetail(
+  joinState: MinecraftAgentJoinState | null | undefined,
+  status: MinecraftAgentStatus | null,
+  form: MinecraftAgentStarterConfigForm
+): string {
+  if (!joinState) {
+    return `等待 mc-agent 回传 Minecraft 状态，当前目标 ${form.minecraftHost}:${form.minecraftPort}`;
+  }
+  const username = joinState.username || status?.worldState?.username || form.username;
+  const host = joinState.host || form.minecraftHost;
+  const port = joinState.port || form.minecraftPort;
+  const dimension = joinState.dimension || status?.worldState?.dimension || '';
+  const position = status?.worldState?.position
+    ? ` @ ${status.worldState.position.x}, ${status.worldState.position.y}, ${status.worldState.position.z}`
+    : '';
+  if (joinState.phase === 'joined') {
+    return `${username} 已在 ${host}:${port}${dimension ? ` / ${dimension}` : ''}${position}`;
+  }
+  return joinState.detail || `${username} 还没有确认进入 ${host}:${port}`;
 }
 
 function MarketplaceStatusBadge({ item }: { item: MarketplaceItem }): ReactElement {
@@ -368,6 +428,9 @@ function MinecraftAgentMarketplaceConfig({
 
   const statusTone = statusLoading && !agentStatus ? 'checking' : agentStatus?.connected ? 'connected' : 'disconnected';
   const statusLabel = statusTone === 'connected' ? 'mc-agent 已连接' : statusTone === 'checking' ? '检查中' : 'mc-agent 未连接';
+  const joinTone = minecraftJoinTone(agentStatus?.joinState);
+  const joinLabel = minecraftJoinLabel(agentStatus?.joinState);
+  const joinDetail = minecraftJoinDetail(agentStatus?.joinState, agentStatus, starterConfigForm);
   const shownWsUrl = agentStatus?.wsUrl || config.agent.minecraftAgentWsUrl;
   const activeGoal = agentStatus?.activeGoal || '暂无';
   const pendingTask = agentStatus?.pendingTask || '空闲';
@@ -582,7 +645,10 @@ function MinecraftAgentMarketplaceConfig({
 
       <div className="minecraft-agent-status" aria-live="polite">
         <div className="minecraft-agent-status-row">
-          <span className={`minecraft-agent-status-badge is-${statusTone}`}>{statusLabel}</span>
+          <div className="minecraft-agent-status-badges">
+            <span className={`minecraft-agent-status-badge is-${statusTone}`}>{statusLabel}</span>
+            <span className={`minecraft-agent-status-badge is-${joinTone}`}>{joinLabel}</span>
+          </div>
           <button className="minecraft-agent-icon-button" type="button" disabled={statusLoading} onClick={() => void refreshStatus()}>
             <RefreshCw className={statusLoading ? 'is-spinning' : ''} size={15} />
             刷新
@@ -591,6 +657,8 @@ function MinecraftAgentMarketplaceConfig({
         <div className="minecraft-agent-status-grid">
           <span>WS</span>
           <strong>{shownWsUrl}</strong>
+          <span>第二账号</span>
+          <strong className={`minecraft-agent-join-text is-${joinTone}`}>{joinDetail}</strong>
           <span>目标</span>
           <strong>{activeGoal}</strong>
           <span>任务</span>

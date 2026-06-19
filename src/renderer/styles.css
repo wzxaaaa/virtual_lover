@@ -2304,6 +2304,14 @@ body.neko-model-dragging .pet-floating-toolbar * {
   justify-content: space-between;
 }
 
+.minecraft-agent-status-badges {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .minecraft-agent-status-badge {
   min-height: 26px;
   display: inline-flex;
@@ -2351,6 +2359,18 @@ body.neko-model-dragging .pet-floating-toolbar * {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.minecraft-agent-join-text.is-connected {
+  color: #0f6d64;
+}
+
+.minecraft-agent-join-text.is-checking {
+  color: #755320;
+}
+
+.minecraft-agent-join-text.is-disconnected {
+  color: #9b3430;
 }
 
 .minecraft-agent-form-grid {

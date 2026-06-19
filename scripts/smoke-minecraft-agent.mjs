@@ -20,6 +20,7 @@ const CLIENT_PROTOCOL = {
     'nearby_players',
     'path_state',
     'danger_state',
+    'world_join_state',
     'shared_containers',
     'block_interaction',
     'collaboration_contract'
@@ -409,6 +410,15 @@ function mockRichStatusFrame(scenario) {
     connected: true,
     mock: true,
     scenario,
+    username: 'SmokeBot',
+    worldJoin: {
+      phase: 'joined',
+      connectedToWorld: true,
+      username: 'SmokeBot',
+      host: '127.0.0.1',
+      port: 55916,
+      dimension: 'overworld'
+    },
     health: 17,
     maxHealth: 20,
     food: 15,
@@ -504,7 +514,26 @@ function startMockMinecraftAgentServer({ scenario = 'normal' } = {}) {
         );
         handshaken = true;
         pending = pending.subarray(Buffer.byteLength(request.slice(0, endIndex + 4)));
-        sendMockFrame(socket, scenario === 'rich-state' ? mockRichStatusFrame(scenario) : { type: 'agent_status', connected: true, mock: true, scenario });
+        sendMockFrame(
+          socket,
+          scenario === 'rich-state'
+            ? mockRichStatusFrame(scenario)
+            : {
+                type: 'agent_status',
+                connected: true,
+                mock: true,
+                scenario,
+                username: 'SmokeBot',
+                worldJoin: {
+                  phase: 'joined',
+                  connectedToWorld: true,
+                  username: 'SmokeBot',
+                  host: '127.0.0.1',
+                  port: 55916,
+                  dimension: 'overworld'
+                }
+              }
+        );
         sendMockFrame(socket, { type: 'log', text: 'mock mc-agent ready' });
         if (scenario === 'rich-state') {
           sendMockFrame(socket, { type: 'chat', sender: 'player', role: 'player', text: 'Can you follow me?' });

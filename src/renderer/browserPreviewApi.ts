@@ -133,6 +133,13 @@ function previewMinecraftAgentStatus(): MinecraftAgentStatus {
     wsUrl: configAgentWsUrl(),
     running: false,
     connected: false,
+    joinState: {
+      phase: 'agent_disconnected',
+      updatedAt: Date.now(),
+      connectedToWorld: false,
+      detail: 'Browser preview cannot access Minecraft Agent IPC.',
+      evidence: 'manual'
+    },
     taskFinished: true,
     activeGoal: null,
     activeGoalUpdatedAt: 0,

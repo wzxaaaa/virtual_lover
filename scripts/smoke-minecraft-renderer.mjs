@@ -173,6 +173,7 @@ class MockMinecraftAgent {
             'nearby_players',
             'path_state',
             'danger_state',
+            'world_join_state',
             'game_chat',
             'shared_containers',
             'block_interaction'
@@ -182,6 +183,15 @@ class MockMinecraftAgent {
           type: 'agent_status',
           connected: true,
           mock: true,
+          username: 'RendererBot',
+          worldJoin: {
+            phase: 'joined',
+            connectedToWorld: true,
+            username: 'RendererBot',
+            host: '127.0.0.1',
+            port: 55916,
+            dimension: 'overworld'
+          },
           position: { x: 12, y: 64, z: -7 },
           trackedPlayer: { name: 'Player', distance: 4, position: { x: 10, y: 64, z: -8 } }
         });
@@ -196,7 +206,21 @@ class MockMinecraftAgent {
           this.send({ type: 'inventory', inventory: { torch: 8, bread: 2, oak_log: 3 } });
         }
         if (frame.type === 'task') {
-          this.send({ type: 'agent_status', connected: true, pendingTask: frame.task, position: { x: 12, y: 64, z: -7 } });
+          this.send({
+            type: 'agent_status',
+            connected: true,
+            pendingTask: frame.task,
+            username: 'RendererBot',
+            worldJoin: {
+              phase: 'joined',
+              connectedToWorld: true,
+              username: 'RendererBot',
+              host: '127.0.0.1',
+              port: 55916,
+              dimension: 'overworld'
+            },
+            position: { x: 12, y: 64, z: -7 }
+          });
           setTimeout(() => {
             this.send({
               type: 'task_finished',

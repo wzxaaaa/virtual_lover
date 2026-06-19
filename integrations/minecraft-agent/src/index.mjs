@@ -13,6 +13,7 @@ const CAPABILITIES = [
   'nearby_players',
   'path_state',
   'danger_state',
+  'world_join_state',
   'game_chat',
   'shared_containers',
   'block_interaction'
@@ -67,6 +68,7 @@ let bridge = null;
 let statusTimer = null;
 let currentTask = null;
 let pathState = { status: 'idle' };
+let worldJoinState = { phase: 'unknown', connectedToWorld: false, updatedAt: now(), detail: 'Minecraft bot has not started yet.' };
 let lastHealth = null;
 
 function now() {
@@ -77,6 +79,19 @@ function log(message) {
   const line = `[${new Date().toLocaleTimeString()}] ${message}`;
   console.log(line);
   broadcast({ type: 'log', text: message, timestamp: now() });
+}
+
+function setWorldJoinState(phase, detail) {
+  worldJoinState = {
+    phase,
+    connectedToWorld: phase === 'joined',
+    updatedAt: now(),
+    detail,
+    username: bot?.username || config?.minecraft?.username,
+    host: config?.minecraft?.host,
+    port: config?.minecraft?.port,
+    dimension: bot?.game?.dimension
+  };
 }
 
 function asNumber(value, fallback) {
@@ -258,6 +273,15 @@ function statusPayload() {
     pendingTask: currentTask?.text || null,
     pendingTaskId: currentTask?.id || null,
     username: bot?.username || config.minecraft.username,
+    worldJoin: {
+      ...worldJoinState,
+      connectedToWorld: Boolean(bot?.entity) || worldJoinState.connectedToWorld,
+      phase: bot?.entity ? 'joined' : worldJoinState.phase,
+      username: bot?.username || worldJoinState.username || config.minecraft.username,
+      host: worldJoinState.host || config.minecraft.host,
+      port: worldJoinState.port || config.minecraft.port,
+      dimension: bot?.game?.dimension || worldJoinState.dimension
+    },
     position: vecToPlain(bot?.entity?.position),
     yaw: bot?.entity?.yaw,
     pitch: bot?.entity?.pitch,
@@ -307,6 +331,7 @@ function publishInventory() {
 }
 
 async function connectMinecraft() {
+  setWorldJoinState('joining', `Connecting Minecraft bot to ${config.minecraft.host}:${config.minecraft.port}.`);
   const options = {
     host: config.minecraft.host,
     port: config.minecraft.port,
@@ -323,6 +348,7 @@ async function connectMinecraft() {
     defaultMovements = new Movements(bot, mcData);
     bot.pathfinder.setMovements(defaultMovements);
     lastHealth = bot.health;
+    setWorldJoinState('joined', `Minecraft bot joined as ${bot.username} on ${config.minecraft.host}:${config.minecraft.port}.`);
     log(`Minecraft bot spawned as ${bot.username} on ${config.minecraft.host}:${config.minecraft.port}`);
     publishStatus();
   });
@@ -358,16 +384,21 @@ async function connectMinecraft() {
   });
 
   bot.on('kicked', (reason) => {
+    setWorldJoinState('rejected', `Minecraft bot kicked: ${String(reason)}`);
     log(`Minecraft bot kicked: ${String(reason)}`);
     broadcast({ type: 'alert', severity: 'error', cause: 'kicked', text: String(reason) });
+    publishStatus();
   });
 
   bot.on('error', (error) => {
+    setWorldJoinState('error', `Minecraft bot error: ${error instanceof Error ? error.message : String(error)}`);
     log(`Minecraft bot error: ${error instanceof Error ? error.message : String(error)}`);
     broadcast({ type: 'alert', severity: 'error', cause: 'bot_error', text: error instanceof Error ? error.message : String(error) });
+    publishStatus();
   });
 
   bot.on('end', () => {
+    setWorldJoinState('left', 'Minecraft bot disconnected.');
     log('Minecraft bot disconnected.');
     finishTask('interrupted', 'Minecraft connection ended.');
     pathState = { status: 'disconnected' };

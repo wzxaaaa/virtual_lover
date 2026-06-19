@@ -11,6 +11,7 @@ import type {
   MinecraftAgentEvent,
   MinecraftAgentDangerState,
   MinecraftAgentInventoryResponse,
+  MinecraftAgentJoinState,
   MinecraftAgentPlanState,
   MinecraftAgentPlanStep,
   MinecraftAgentPlanStepStatus,
@@ -69,6 +70,7 @@ const MINECRAFT_AGENT_CLIENT_CAPABILITIES = [
   'nearby_players',
   'path_state',
   'danger_state',
+  'world_join_state',
   'shared_containers',
   'block_interaction',
   'collaboration_contract'
@@ -145,6 +147,204 @@ function normalizeWsUrl(value: unknown): string {
 
 function normalizeTimeoutMs(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? Math.max(1000, Math.min(300000, Math.round(value))) : 120000;
+}
+
+function cloneJoinState(joinState: MinecraftAgentJoinState): MinecraftAgentJoinState {
+  return { ...joinState };
+}
+
+function createJoinState(
+  phase: MinecraftAgentJoinState['phase'],
+  patch: Partial<Omit<MinecraftAgentJoinState, 'phase' | 'updatedAt' | 'connectedToWorld'>> = {}
+): MinecraftAgentJoinState {
+  return {
+    phase,
+    updatedAt: Date.now(),
+    connectedToWorld: phase === 'joined',
+    ...patch
+  };
+}
+
+function booleanFromUnknown(value: unknown): boolean | null {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value !== 0;
+  }
+
+  if (typeof value === 'string') {
+    const text = value.trim().toLowerCase();
+    if (['true', 'yes', 'y', '1', 'online', 'ready', 'spawned', 'joined', 'connected', 'in_game', 'in-game'].includes(text)) {
+      return true;
+    }
+    if (['false', 'no', 'n', '0', 'offline', 'left', 'ended', 'kicked', 'disconnected', 'not_connected', 'not connected'].includes(text)) {
+      return false;
+    }
+  }
+
+  return null;
+}
+
+function joinPhaseFromUnknown(value: unknown): MinecraftAgentJoinState['phase'] | null {
+  const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+  if (!text) {
+    return null;
+  }
+  if (['joined', 'spawned', 'ready', 'online', 'connected', 'in_game', 'in-game'].includes(text)) {
+    return 'joined';
+  }
+  if (['joining', 'connecting', 'starting', 'pending'].includes(text)) {
+    return 'joining';
+  }
+  if (['left', 'ended', 'disconnected', 'offline'].includes(text)) {
+    return 'left';
+  }
+  if (['kicked', 'rejected', 'denied', 'banned', 'whitelist'].some((item) => text.includes(item))) {
+    return 'rejected';
+  }
+  if (['error', 'failed', 'crashed'].some((item) => text.includes(item))) {
+    return 'error';
+  }
+  return null;
+}
+
+function joinStateFromAgentStatus(frame: Record<string, unknown>, previous: MinecraftAgentJoinState): MinecraftAgentJoinState | null {
+  const candidates = statusCandidates(frame);
+  const joinValue = findStatusValue(candidates, ['worldJoin', 'world_join', 'joinState', 'join_state', 'minecraftJoin', 'minecraft_join']);
+  const joinObject = isRecord(joinValue) ? joinValue : null;
+  const joinCandidates = joinObject ? [joinObject, ...candidates] : candidates;
+  const explicitPhase = joinPhaseFromUnknown(findStatusValue(joinCandidates, ['phase', 'joinPhase', 'join_phase', 'status', 'state']));
+  const connectedFlag = booleanFromUnknown(findStatusValue(joinCandidates, ['connectedToWorld', 'connected_to_world', 'inGame', 'in_game', 'joined', 'spawned', 'ready', 'connected']));
+  const username = findStatusString(joinCandidates, ['username', 'botUsername', 'bot_username', 'botName', 'bot_name', 'playerName', 'player_name', 'name']);
+  const host = findStatusString(joinCandidates, ['host', 'minecraftHost', 'minecraft_host', 'serverHost', 'server_host']);
+  const port = findStatusNumber(joinCandidates, ['port', 'minecraftPort', 'minecraft_port', 'serverPort', 'server_port']);
+  const dimension = findStatusString(joinCandidates, ['dimension', 'world', 'realm']);
+  const detail = findStatusString(joinCandidates, ['detail', 'message', 'text', 'reason']);
+  const fallbackDisconnectedPhase =
+    previous.phase === 'joined'
+      ? 'left'
+      : previous.phase === 'left' || previous.phase === 'rejected' || previous.phase === 'error'
+        ? previous.phase
+        : 'joining';
+  const phase = explicitPhase ?? (connectedFlag === true ? 'joined' : connectedFlag === false ? fallbackDisconnectedPhase : null);
+
+  if (!phase) {
+    return null;
+  }
+
+  return createJoinState(phase, {
+    ...(username ? { username } : previous.username ? { username: previous.username } : {}),
+    ...(host ? { host } : previous.host ? { host: previous.host } : {}),
+    ...(port !== undefined ? { port } : previous.port !== undefined ? { port: previous.port } : {}),
+    ...(dimension ? { dimension } : previous.dimension ? { dimension: previous.dimension } : {}),
+    detail:
+      detail ||
+      (phase === 'joined'
+        ? 'Minecraft bot is inside the world.'
+        : phase === 'joining'
+          ? 'mc-agent is connected; waiting for the Minecraft bot to spawn.'
+          : phase === 'left'
+            ? 'Minecraft bot left the world.'
+            : phase === 'rejected'
+              ? 'Minecraft bot was rejected by the world.'
+              : phase === 'error'
+                ? 'Minecraft bot reported an error.'
+                : previous.detail),
+    evidence: joinObject ? 'world_join' : 'agent_status'
+  });
+}
+
+function joinStateFromLog(text: string, previous: MinecraftAgentJoinState): MinecraftAgentJoinState | null {
+  const clean = text.trim();
+  if (!clean) {
+    return null;
+  }
+
+  const spawned = /minecraft bot spawned as\s+(.+?)\s+on\s+(.+?):(\d{1,5})/i.exec(clean);
+  if (spawned) {
+    return createJoinState('joined', {
+      username: spawned[1],
+      host: spawned[2],
+      port: Number(spawned[3]),
+      detail: clean,
+      evidence: 'log'
+    });
+  }
+
+  if (/joined the game/i.test(clean)) {
+    const username = /^(.+?)\s+joined the game/i.exec(clean)?.[1]?.trim();
+    return createJoinState('joined', {
+      ...(username ? { username } : previous.username ? { username: previous.username } : {}),
+      ...(previous.host ? { host: previous.host } : {}),
+      ...(previous.port !== undefined ? { port: previous.port } : {}),
+      detail: clean,
+      evidence: 'log'
+    });
+  }
+
+  if (/kicked|whitelist|banned|denied|not allowed/i.test(clean)) {
+    return createJoinState('rejected', {
+      ...(previous.username ? { username: previous.username } : {}),
+      ...(previous.host ? { host: previous.host } : {}),
+      ...(previous.port !== undefined ? { port: previous.port } : {}),
+      detail: clean,
+      evidence: 'log'
+    });
+  }
+
+  if (/minecraft bot disconnected|left the game|connection ended/i.test(clean)) {
+    return createJoinState('left', {
+      ...(previous.username ? { username: previous.username } : {}),
+      ...(previous.host ? { host: previous.host } : {}),
+      ...(previous.port !== undefined ? { port: previous.port } : {}),
+      detail: clean,
+      evidence: 'log'
+    });
+  }
+
+  if (/minecraft bot error|failed to connect|econnrefused|timed out|version mismatch|invalid session|login failed/i.test(clean)) {
+    return createJoinState('error', {
+      ...(previous.username ? { username: previous.username } : {}),
+      ...(previous.host ? { host: previous.host } : {}),
+      ...(previous.port !== undefined ? { port: previous.port } : {}),
+      detail: clean,
+      evidence: 'log'
+    });
+  }
+
+  if (/cannot chat before minecraft bot is connected/i.test(clean)) {
+    return createJoinState('joining', {
+      ...(previous.username ? { username: previous.username } : {}),
+      ...(previous.host ? { host: previous.host } : {}),
+      ...(previous.port !== undefined ? { port: previous.port } : {}),
+      detail: clean,
+      evidence: 'log'
+    });
+  }
+
+  return null;
+}
+
+function joinStateFromAlert(text: string, severity: string, cause: unknown, previous: MinecraftAgentJoinState): MinecraftAgentJoinState | null {
+  const causeText = typeof cause === 'string' ? cause : isRecord(cause) ? JSON.stringify(cause) : '';
+  const combined = `${severity} ${causeText} ${text}`.trim();
+  const phase = /kicked|whitelist|banned|denied|not allowed/i.test(combined)
+    ? 'rejected'
+    : /error|failed|fatal|crash/i.test(combined)
+      ? 'error'
+      : null;
+  if (!phase) {
+    return null;
+  }
+  return createJoinState(phase, {
+    ...(previous.username ? { username: previous.username } : {}),
+    ...(previous.host ? { host: previous.host } : {}),
+    ...(previous.port !== undefined ? { port: previous.port } : {}),
+    detail: text,
+    evidence: 'alert'
+  });
 }
 
 function inventorySummary(inventory: Record<string, number>, source: MinecraftAgentInventoryResponse['source']): string {
@@ -835,11 +1035,13 @@ function normalizeWorldState(frame: Record<string, unknown>): MinecraftAgentWorl
   const saturation = findStatusNumber(candidates, ['saturation']);
   const level = findStatusNumber(candidates, ['level', 'xpLevel', 'xp_level']);
   const xp = findStatusNumber(candidates, ['xp', 'experience']);
+  const username = findStatusString(candidates, ['username', 'botUsername', 'bot_username', 'botName', 'bot_name', 'playerName', 'player_name', 'name']);
   const dimension = findStatusString(candidates, ['dimension', 'world', 'realm']);
   const biome = findStatusString(candidates, ['biome']);
   const gameMode = findStatusString(candidates, ['gameMode', 'game_mode', 'mode']);
   const danger = normalizeDangerState(findStatusValue(candidates, ['danger', 'dangerState', 'danger_state', 'risk', 'threat', 'threats', 'hazard', 'hazards']), health);
 
+  if (username) worldState.username = username;
   if (health !== undefined) worldState.health = health;
   if (maxHealth !== undefined) worldState.maxHealth = maxHealth;
   if (food !== undefined) worldState.food = food;
@@ -1177,6 +1379,10 @@ export class MinecraftAgentService {
   private lastInventoryAt = 0;
   private worldState: MinecraftAgentWorldState | null = null;
   private protocolState: MinecraftAgentProtocolState | null = null;
+  private joinState: MinecraftAgentJoinState = createJoinState('unknown', {
+    detail: 'Waiting for Minecraft Agent status.',
+    evidence: 'manual'
+  });
   private lastError: string | null = null;
   private lastTaskFinishedAt = 0;
   private lastInProgressNudgeAt = 0;
@@ -1208,6 +1414,10 @@ export class MinecraftAgentService {
   stop(): void {
     this.running = false;
     this.connected = false;
+    this.joinState = createJoinState('unknown', {
+      detail: 'Minecraft Agent stopped.',
+      evidence: 'manual'
+    });
     this.clearReconnectTimer();
     this.clearSystemLoopTimer();
     this.resolvePending({
@@ -1254,6 +1464,7 @@ export class MinecraftAgentService {
       wsUrl: this.wsUrl,
       running: this.running,
       connected: this.connected,
+      joinState: cloneJoinState(this.joinState),
       taskFinished: this.pendingTask === null,
       activeGoal: this.activeGoal,
       activeGoalUpdatedAt: this.activeGoalUpdatedAt,
@@ -1584,6 +1795,29 @@ export class MinecraftAgentService {
     return this.protocolState;
   }
 
+  private setJoinState(nextState: MinecraftAgentJoinState | null): boolean {
+    if (!nextState) {
+      return false;
+    }
+
+    const current = this.joinState;
+    const changed =
+      current.phase !== nextState.phase ||
+      current.connectedToWorld !== nextState.connectedToWorld ||
+      current.username !== nextState.username ||
+      current.host !== nextState.host ||
+      current.port !== nextState.port ||
+      current.dimension !== nextState.dimension ||
+      current.detail !== nextState.detail ||
+      current.evidence !== nextState.evidence;
+
+    if (changed) {
+      this.joinState = nextState;
+    }
+
+    return changed;
+  }
+
   private updateActiveGoalFromRequest(request: MinecraftAgentTaskRequest, taskText: string): void {
     const nextGoal = normalizeActiveGoal(request.goal, taskText);
     if (nextGoal === this.activeGoal) {
@@ -1706,6 +1940,12 @@ export class MinecraftAgentService {
         }
         this.connected = true;
         this.lastError = null;
+        this.setJoinState(
+          createJoinState('joining', {
+            detail: 'Connected to mc-agent; waiting for the Minecraft bot to join the world.',
+            evidence: 'websocket'
+          })
+        );
         this.updateProtocolState('legacy', undefined, ['task', 'query_inventory']);
         this.emitStatus();
       };
@@ -1725,6 +1965,12 @@ export class MinecraftAgentService {
         this.socket = null;
         this.connected = false;
         this.lastError = 'Minecraft Agent connection lost; reconnecting.';
+        this.setJoinState(
+          createJoinState('agent_disconnected', {
+            detail: this.lastError,
+            evidence: 'socket'
+          })
+        );
         this.interruptPendingForConnectionBounce();
         this.resolveInventoryWaiters('none', this.lastError);
         this.emitStatus();
@@ -1734,6 +1980,12 @@ export class MinecraftAgentService {
       this.socket = null;
       this.connected = false;
       this.lastError = error instanceof Error ? error.message : 'Failed to create WebSocket.';
+      this.setJoinState(
+        createJoinState('agent_disconnected', {
+          detail: this.lastError,
+          evidence: 'socket'
+        })
+      );
       this.emitStatus();
       this.scheduleReconnect();
     }
@@ -1903,7 +2155,11 @@ export class MinecraftAgentService {
       const text = stringOrEmpty(frame.text) || stringOrEmpty(frame.data) || stringOrEmpty(frame.message);
       if (text) {
         this.pushLog(text);
+        const joinChanged = this.setJoinState(joinStateFromLog(text, this.joinState));
         this.events.emit('event', { type: 'log', text } satisfies MinecraftAgentEvent);
+        if (joinChanged) {
+          this.emitStatus();
+        }
       }
       return;
     }
@@ -1946,8 +2202,10 @@ export class MinecraftAgentService {
       const text = stringOrEmpty(frame.text) || stringOrEmpty(frame.message);
       if (text) {
         const severity = stringOrEmpty(frame.severity).toLowerCase() || 'warn';
+        const rawCause = frame.cause;
         const cause = isRecord(frame.cause) ? { ...frame.cause } : undefined;
         this.pushLog(`[${severity}] ${text}`);
+        const joinChanged = this.setJoinState(joinStateFromAlert(text, severity, rawCause, this.joinState));
         this.events.emit(
           'event',
           {
@@ -1960,7 +2218,11 @@ export class MinecraftAgentService {
             }
           } satisfies MinecraftAgentEvent
         );
-        this.emitStatus();
+        if (joinChanged) {
+          this.emitStatus();
+        } else {
+          this.emitStatus();
+        }
       }
       return;
     }
@@ -1970,8 +2232,10 @@ export class MinecraftAgentService {
       if (worldState) {
         this.worldState = worldState;
       }
+      const joinChanged = this.setJoinState(joinStateFromAgentStatus(frame, this.joinState));
       this.updateProtocolState('status', frame, [
         'agent_status',
+        ...(joinChanged || this.joinState.phase !== 'unknown' ? ['world_join_state'] : []),
         ...(worldState?.trackedPlayer ? ['tracked_player'] : []),
         ...(worldState?.nearbyPlayers?.length ? ['nearby_players'] : []),
         ...(worldState?.path ? ['path_state'] : []),

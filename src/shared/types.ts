@@ -554,6 +554,7 @@ export interface MinecraftAgentProtocolState {
 
 export interface MinecraftAgentWorldState {
   updatedAt: number;
+  username?: string;
   health?: number;
   maxHealth?: number;
   food?: number;
@@ -575,10 +576,25 @@ export interface MinecraftAgentWorldState {
   blockInteraction?: MinecraftAgentBlockInteractionState;
 }
 
+export type MinecraftAgentJoinPhase = 'unknown' | 'agent_disconnected' | 'joining' | 'joined' | 'left' | 'rejected' | 'error';
+
+export interface MinecraftAgentJoinState {
+  phase: MinecraftAgentJoinPhase;
+  updatedAt: number;
+  connectedToWorld: boolean;
+  username?: string;
+  host?: string;
+  port?: number;
+  dimension?: string;
+  detail?: string;
+  evidence?: 'websocket' | 'agent_status' | 'world_join' | 'log' | 'alert' | 'socket' | 'manual';
+}
+
 export interface MinecraftAgentStatus {
   wsUrl: string;
   running: boolean;
   connected: boolean;
+  joinState: MinecraftAgentJoinState;
   taskFinished: boolean;
   activeGoal: string | null;
   activeGoalUpdatedAt: number;

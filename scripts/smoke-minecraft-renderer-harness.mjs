@@ -320,6 +320,7 @@ async function run() {
 
     const runResult = await win.webContents.executeJavaScript('window.__mcSmokeRun()', true);
     assert(runResult.initial && typeof runResult.initial.connected === 'boolean', 'renderer status call should return MinecraftAgentStatus');
+    assert(runResult.statusAfterTask?.joinState?.phase === 'joined', `renderer status should expose joined world state: ${JSON.stringify(runResult.statusAfterTask)}`);
     assert(runResult.inventory?.ok === true, `renderer inventory tool should succeed: ${JSON.stringify(runResult.inventory)}`);
     assert(runResult.inventory?.output?.inventory?.torch === 8, 'renderer inventory should come from live mock');
     assert(runResult.task?.ok === true, `renderer minecraft task should dispatch: ${JSON.stringify(runResult.task)}`);
@@ -333,7 +334,7 @@ async function run() {
             const protocol = events.find((event) => event.type === 'protocol' && event.protocol?.agentName === 'mock-renderer-mc-agent')?.protocol || null;
             const taskFinished = events.find((event) => event.type === 'taskFinished')?.result || null;
             const inventory = events.find((event) => event.type === 'inventory')?.inventory || null;
-            const status = events.find((event) => event.type === 'status')?.status || null;
+            const status = events.find((event) => event.type === 'status' && event.status?.joinState?.phase === 'joined')?.status || null;
             const text = document.getElementById('events')?.textContent || '';
             return {
               types: events.map((event) => event.type),
@@ -346,13 +347,14 @@ async function run() {
           })()`,
           true
         );
-        return state.protocol && state.taskFinished?.status === 'ok' && state.inventory ? state : null;
+        return state.protocol && state.taskFinished?.status === 'ok' && state.inventory && state.status?.joinState?.phase === 'joined' ? state : null;
       },
       'renderer Minecraft event bridge'
     );
 
     assert(rendererState.protocol?.agentName === 'mock-renderer-mc-agent', `renderer should receive protocol event: ${JSON.stringify(rendererState)}`);
     assert(rendererState.protocol?.missingCapabilities?.length === 0, 'renderer protocol should expose no missing mock capabilities');
+    assert(rendererState.status?.joinState?.username === 'RendererBot', 'renderer status should expose bot username');
     assert(rendererState.inventory?.oak_log === 3 || rendererState.inventory?.oak_log === 5, 'renderer should receive inventory event');
     assert(rendererState.taskFinished?.status === 'ok', `renderer should receive taskFinished ok event: ${JSON.stringify(rendererState.taskFinished)}`);
     assert(rendererState.text.includes('taskFinished'), 'renderer DOM should render Minecraft event stream');
